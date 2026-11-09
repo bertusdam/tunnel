@@ -8,6 +8,11 @@ A first-person browser racing prototype about wireframe geometry, momentum, and 
 - `npm run dev`
 - Open the local URL printed by Vite.
 
+## Play online
+
+The game is published with GitHub Pages at <https://bertusdam.github.io/tunnel/>.
+Each push to `main` runs the tests, builds the game, and deploys the updated site.
+
 ## Controls
 
 - Left / Right arrows or A / D: steer
