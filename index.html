@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#05070c" />
+    <meta name="description" content="A high-speed wireframe tunnel racing prototype." />
+    <title>Tunnel Vector — Wireframe Racer</title>
+  </head>
+  <body>
+    <main class="game-shell" aria-label="Tunnel Vector racing game">
+      <canvas id="game-canvas" tabindex="0" aria-label="First-person wireframe racing view"></canvas>
+
+      <div class="scanline" aria-hidden="true"></div>
+      <div class="edge-vignette" aria-hidden="true"></div>
+
+      <section id="hud" class="hud is-hidden" aria-live="polite">
+        <div class="hud-topline">
+          <div class="brand-mark"><span class="brand-mark__glyph">V</span><span>VECTOR SYSTEMS</span></div>
+          <div class="hud-topline__right">
+            <span id="section-label" class="section-label">LEVEL 01 / 20</span>
+            <button id="pause-button" class="icon-button" type="button" aria-label="Pause game" title="Pause (Escape)">
+              <span class="pause-glyph" aria-hidden="true">Ⅱ</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="reticle" aria-hidden="true"><span></span><i></i></div>
+
+        <div class="hud-bottomline">
+          <div class="speed-panel">
+            <div class="hud-label"><span>VELOCITY</span><span class="hud-label__unit">VECTOR UNITS</span></div>
+            <div class="speed-readout"><span id="speed-value">00</span><span class="speed-readout__max">/ 120</span></div>
+            <div class="speed-meter" role="meter" aria-label="Speed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="speed-fill"></span><i></i><i></i><i></i>
+            </div>
+            <div class="speed-caption"><span>THRUST</span><span>MAX VELOCITY</span></div>
+          </div>
+
+          <div id="jump-panel" class="jump-panel jump-panel--red" aria-live="polite">
+            <div class="jump-panel__header"><span class="hud-label">FLIGHT VECTOR</span><span id="gap-distance" class="jump-distance">—</span></div>
+            <div class="jump-panel__body">
+              <span id="signal-lamp" class="signal-lamp" aria-hidden="true"></span>
+              <div><strong id="jump-status">BUILD SPEED</strong><small id="jump-detail">Next transfer calculating</small></div>
+            </div>
+            <div class="signal-track" aria-hidden="true"><i></i><i></i><i></i></div>
+          </div>
+
+          <div class="run-stats"><span class="hud-label">RUN DISTANCE</span><strong id="run-distance">0000 <small>m</small></strong><span id="run-state">SYSTEM READY</span></div>
+        </div>
+      </section>
+
+      <section id="title-screen" class="screen screen--title">
+        <div class="title-screen__grid" aria-hidden="true"></div>
+        <div class="title-card">
+          <p class="eyebrow"><span class="status-dot"></span> HIGH-SPEED GEOMETRY / 01</p>
+          <h1>TUNNEL<span>VECTOR</span></h1>
+          <p class="title-card__lead">Find the line.<br />Keep the velocity.</p>
+          <p class="title-card__copy">A first-person run through a living wireframe. Two transfers. One rule: carry enough speed to make the next world.</p>
+          <button id="start-button" class="primary-button" type="button"><span>INITIALIZE RUN</span><i aria-hidden="true">↗</i></button>
+          <div class="control-guide">
+            <div><kbd>←</kbd><kbd>→</kbd><span>STEER · A / D</span></div>
+            <div><kbd>↑</kbd><span>THROTTLE · W</span></div>
+            <div><kbd>↓</kbd><span>BRAKE · S</span></div>
+            <div><kbd>ESC</kbd><span>PAUSE</span></div>
+          </div>
+          <div class="title-options">
+            <button id="motion-toggle" class="text-toggle" type="button" aria-pressed="false">MOTION: <b>FULL</b></button>
+            <button id="sound-toggle" class="text-toggle" type="button" aria-pressed="false">AUDIO: <b>ON</b></button>
+            <button id="fullscreen-button" class="text-toggle" type="button">FULLSCREEN <span aria-hidden="true">⛶</span></button>
+          </div>
+        </div>
+        <div class="title-aside" aria-hidden="true"><span>V 01</span><span>EST. RUN TIME<br />00:45 — 01:00</span><span>NO ROAD<br />NO LIMIT</span></div>
+        <div class="screen-footer"><span>VECTOR SYSTEMS <i>©</i> 2084</span><span>ENGINE / FLIGHT / MOMENTUM</span></div>
+      </section>
+
+      <section id="pause-screen" class="screen screen--modal is-hidden" aria-labelledby="pause-title">
+        <div class="modal-card">
+          <p class="eyebrow"><span class="status-dot status-dot--amber"></span> RUN SUSPENDED</p>
+          <h2 id="pause-title">HOLD<br /><span>POSITION.</span></h2>
+          <p class="modal-copy">The vector is yours when you're ready.</p>
+          <button id="resume-button" class="primary-button" type="button"><span>RESUME RUN</span><i aria-hidden="true">↗</i></button>
+          <button id="restart-pause-button" class="secondary-button" type="button">RESTART FROM BEGINNING <span>↻</span></button>
+          <div class="modal-options">
+            <button id="pause-motion-toggle" class="text-toggle" type="button" aria-pressed="false">MOTION: <b>FULL</b></button>
+            <button id="pause-sound-toggle" class="text-toggle" type="button" aria-pressed="false">AUDIO: <b>ON</b></button>
+          </div>
+          <p class="key-hint"><kbd>ESC</kbd> TO RESUME</p>
+        </div>
+      </section>
+
+      <section id="crash-screen" class="crash-screen is-hidden" aria-live="assertive">
+        <span class="crash-screen__line"></span>
+        <strong id="crash-title">VECTOR LOST</strong>
+        <span id="crash-detail">RECALIBRATING AT CHECKPOINT</span>
+      </section>
+
+      <section id="finish-screen" class="screen screen--modal is-hidden" aria-labelledby="finish-title">
+        <div class="modal-card modal-card--finish">
+          <p id="finish-eyebrow" class="eyebrow"><span class="status-dot"></span> LEVEL 20 / 20 COMPLETE</p>
+          <h2 id="finish-title">LINE<br /><span>SECURED.</span></h2>
+          <p id="finish-copy" class="modal-copy">Twenty levels. Sharper turns at every step. You kept the line.</p>
+          <button id="restart-finish-button" class="primary-button" type="button"><span>RUN IT AGAIN</span><i aria-hidden="true">↗</i></button>
+          <p class="key-hint">ARROWS / WASD TO DRIVE <span>ESC TO PAUSE</span></p>
+        </div>
+      </section>
+
+      <div id="toast" class="toast is-hidden" role="status"></div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
