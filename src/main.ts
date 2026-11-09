@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import './style.css';
 import {
   cameraOrientationForSteering,
@@ -141,6 +144,7 @@ renderer.setSize(window.innerWidth, window.innerHeight, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NoToneMapping;
 renderer.setClearColor(0x05070c, 1);
+const wireframeMaterials: LineMaterial[] = [];
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05070c);
@@ -283,6 +287,22 @@ function addLineSegments(points: THREE.Vector3[], color: number, opacity: number
   const lines = new THREE.LineSegments(geometry, material);
   trackRoot.add(lines);
   return lines;
+}
+
+function addWireframeSegments(points: THREE.Vector3[], color: number, opacity: number): void {
+  const geometry = new LineSegmentsGeometry().setPositions(
+    points.flatMap(({ x, y, z }) => [x, y, z]),
+  );
+  const material = new LineMaterial({
+    color,
+    linewidth: 3,
+    transparent: opacity < 1,
+    opacity,
+    depthWrite: false,
+  });
+  material.resolution.set(window.innerWidth, window.innerHeight);
+  wireframeMaterials.push(material);
+  trackRoot.add(new LineSegments2(geometry, material));
 }
 
 function addMetalSideWalls(section: TunnelSection): void {
@@ -571,7 +591,7 @@ function addTunnel(section: TunnelSection, index: number): void {
 
   const railPoints: THREE.Vector3[] = [];
   const ringPoints: THREE.Vector3[] = [];
-  const ringStep = 12;
+  const ringStep = 24;
   const railStep = 6;
 
   for (let distance = section.start; distance < section.end; distance += railStep) {
@@ -599,8 +619,8 @@ function addTunnel(section: TunnelSection, index: number): void {
 
   const railColor = index === 1 ? 0x70f5ef : index === 2 ? 0xb48aff : 0x48dce8;
   const ringColor = index === 2 ? 0xa983ed : 0x88e9ef;
-  addLineSegments(railPoints, railColor, 0.82);
-  addLineSegments(ringPoints, ringColor, index === 2 ? 0.42 : 0.34);
+  addWireframeSegments(railPoints, railColor, 0.92);
+  addWireframeSegments(ringPoints, ringColor, index === 2 ? 0.62 : 0.54);
 }
 
 function addGate(distance: number, color: number, opacity = 0.95): void {
@@ -1253,6 +1273,9 @@ function updateCamera(deltaTime: number): void {
 function resizeRenderer(): void {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
   renderer.setSize(window.innerWidth, window.innerHeight, false);
+  for (const material of wireframeMaterials) {
+    material.resolution.set(window.innerWidth, window.innerHeight);
+  }
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 }
