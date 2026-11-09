@@ -33,16 +33,13 @@ jobs:
         run: npm test
       - name: Build site
         run: npm run build
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
+    if: github.event.repository.private == false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -52,6 +49,10 @@ jobs:
       pages: write
       id-token: write
     steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
