@@ -742,6 +742,12 @@ class SpeedAudio {
   private overtoneGain: GainNode;
   private engineVibrato: OscillatorNode;
   private vibratoDepth: GainNode;
+  private wallPanner: StereoPannerNode;
+  private echoSend: GainNode;
+  private echoDelay: DelayNode;
+  private echoFilter: BiquadFilterNode;
+  private echoFeedback: GainNode;
+  private echoReturn: GainNode;
   private paused = false;
   private muted = false;
 
@@ -752,6 +758,23 @@ class SpeedAudio {
     this.master.gain.value = 0;
     this.master.connect(this.context.destination);
 
+    this.wallPanner = this.context.createStereoPanner();
+    this.wallPanner.connect(this.master);
+    this.echoSend = this.context.createGain();
+    this.echoSend.gain.value = 0;
+    this.echoDelay = this.context.createDelay(0.5);
+    this.echoDelay.delayTime.value = 0.19;
+    this.echoFilter = this.context.createBiquadFilter();
+    this.echoFilter.type = 'lowpass';
+    this.echoFilter.frequency.value = 1700;
+    this.echoFeedback = this.context.createGain();
+    this.echoFeedback.gain.value = 0;
+    this.echoReturn = this.context.createGain();
+    this.echoReturn.gain.value = 0;
+    this.wallPanner.connect(this.echoSend).connect(this.echoDelay);
+    this.echoDelay.connect(this.echoReturn).connect(this.master);
+    this.echoDelay.connect(this.echoFilter).connect(this.echoFeedback).connect(this.echoDelay);
+
     this.engine = this.context.createOscillator();
     this.engine.type = 'triangle';
     this.engine.frequency.value = 48;
@@ -760,7 +783,7 @@ class SpeedAudio {
     this.engineFilter.frequency.value = 320;
     this.engineGain = this.context.createGain();
     this.engineGain.gain.value = 0.025;
-    this.engine.connect(this.engineFilter).connect(this.engineGain).connect(this.master);
+    this.engine.connect(this.engineFilter).connect(this.engineGain).connect(this.wallPanner);
     this.engine.start();
 
     this.engineOvertone = this.context.createOscillator();
@@ -768,7 +791,7 @@ class SpeedAudio {
     this.engineOvertone.frequency.value = 96;
     this.overtoneGain = this.context.createGain();
     this.overtoneGain.gain.value = 0.004;
-    this.engineOvertone.connect(this.overtoneGain).connect(this.master);
+    this.engineOvertone.connect(this.overtoneGain).connect(this.wallPanner);
     this.engineOvertone.start();
 
     this.engineVibrato = this.context.createOscillator();
@@ -795,17 +818,22 @@ class SpeedAudio {
     this.refreshMaster();
   }
 
-  update(normalizedSpeed: number): void {
+  update(normalizedSpeed: number, wallProximity: number, wallSide: number, inTunnel: boolean): void {
     const now = this.context.currentTime;
     const amount = THREE.MathUtils.clamp(normalizedSpeed, 0, 1);
-    const engineFrequency = 45 + amount * 100;
+    const proximity = THREE.MathUtils.clamp(wallProximity, 0, 1);
+    const engineFrequency = 45 + amount * 100 + proximity * 7;
     this.engine.frequency.setTargetAtTime(engineFrequency, now, 0.08);
     this.engineOvertone.frequency.setTargetAtTime(engineFrequency * 2.01, now, 0.08);
-    this.engineFilter.frequency.setTargetAtTime(300 + amount * 1250, now, 0.1);
+    this.engineFilter.frequency.setTargetAtTime(300 + amount * 1250 + proximity * 900, now, 0.1);
     this.engineGain.gain.setTargetAtTime(0.018 + amount * 0.04, now, 0.12);
-    this.overtoneGain.gain.setTargetAtTime(0.004 + amount * 0.014, now, 0.12);
+    this.overtoneGain.gain.setTargetAtTime(0.004 + amount * 0.014 + proximity * 0.012, now, 0.12);
     this.engineVibrato.frequency.setTargetAtTime(3 + amount * 5, now, 0.12);
-    this.vibratoDepth.gain.setTargetAtTime(0.25 + amount * 1.1, now, 0.12);
+    this.vibratoDepth.gain.setTargetAtTime(0.25 + amount * 1.1 + proximity * 0.8, now, 0.12);
+    this.wallPanner.pan.setTargetAtTime(wallSide * proximity * 0.7, now, 0.14);
+    this.echoSend.gain.setTargetAtTime(inTunnel ? 0.2 : 0, now, inTunnel ? 0.12 : 0.025);
+    this.echoReturn.gain.setTargetAtTime(inTunnel ? 0.32 : 0, now, inTunnel ? 0.12 : 0.025);
+    this.echoFeedback.gain.setTargetAtTime(inTunnel ? 0.28 : 0, now, inTunnel ? 0.12 : 0.025);
   }
 
   private refreshMaster(): void {
@@ -1293,7 +1321,10 @@ function animate(time: number): void {
   updateDriving(deltaTime);
   updateCamera(deltaTime || 1 / 60);
   renderer.render(scene, camera);
-  speedAudio?.update(speed / MAX_SPEED);
+  const wallDistance = HALF_WIDTH - PLAYER_COLLISION_RADIUS - Math.abs(lateralOffset);
+  const wallProximity = THREE.MathUtils.clamp((5.5 - wallDistance) / 5.5, 0, 1);
+  const insideTunnel = !airborne && TUNNELS.some((section) => distance >= section.start && distance <= section.end);
+  speedAudio?.update(speed / MAX_SPEED, wallProximity, Math.sign(lateralOffset), gameState === 'playing' && insideTunnel);
 
   if (gameState === 'playing' && time - lastUiUpdate > 80) {
     updateHud();
