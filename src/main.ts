@@ -91,6 +91,7 @@ const GAPS: JumpGap[] = Array.from({ length: MAX_LEVEL }, (_, levelIndex) =>
 const LEVEL_ENDS = Array.from({ length: MAX_LEVEL }, (_, index) => (index + 1) * LEVEL_LENGTH);
 const LEVEL_TRANSITION_LENGTH = 120;
 const STARTING_CAMERA_CLEARANCE = 12;
+const TUNNEL_RING_SPACING = 24;
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
 const byId = <T extends HTMLElement>(id: string): T => {
@@ -591,7 +592,7 @@ function addTunnel(section: TunnelSection, index: number): void {
 
   const railPoints: THREE.Vector3[] = [];
   const ringPoints: THREE.Vector3[] = [];
-  const ringStep = 24;
+  const ringStep = TUNNEL_RING_SPACING;
   const railStep = 6;
 
   for (let distance = section.start; distance < section.end; distance += railStep) {
@@ -750,12 +751,20 @@ class SpeedAudio {
   private echoFilter: BiquadFilterNode;
   private echoFeedback: GainNode;
   private echoReturn: GainNode;
+  private swooshBuffer: AudioBuffer;
+  private lastSwooshTime = Number.NEGATIVE_INFINITY;
   private paused = false;
   private muted = false;
 
   constructor() {
     const AudioContextConstructor = window.AudioContext;
     this.context = new AudioContextConstructor();
+    const swooshLength = Math.floor(this.context.sampleRate * 0.24);
+    this.swooshBuffer = this.context.createBuffer(1, swooshLength, this.context.sampleRate);
+    const swooshSamples = this.swooshBuffer.getChannelData(0);
+    for (let index = 0; index < swooshLength; index += 1) {
+      swooshSamples[index] = Math.random() * 2 - 1;
+    }
     this.master = this.context.createGain();
     this.master.gain.value = 0;
     this.master.connect(this.context.destination);
@@ -859,9 +868,34 @@ class SpeedAudio {
     this.engineVibrato.frequency.setTargetAtTime(2.2 + amount * 3.5, now, 0.12);
     this.vibratoDepth.gain.setTargetAtTime(0.12 + amount * 0.45, now, 0.12);
     this.wallPanner.pan.setTargetAtTime(wallSide * proximity * 0.7, now, 0.14);
-    this.echoSend.gain.setTargetAtTime(inTunnel ? 0.75 : 0, now, inTunnel ? 0.12 : 0.025);
-    this.echoReturn.gain.setTargetAtTime(inTunnel ? 0.62 : 0, now, inTunnel ? 0.12 : 0.025);
-    this.echoFeedback.gain.setTargetAtTime(inTunnel ? 0.36 : 0, now, inTunnel ? 0.12 : 0.025);
+    this.echoSend.gain.setTargetAtTime(inTunnel ? 0.48 : 0, now, inTunnel ? 0.12 : 0.025);
+    this.echoReturn.gain.setTargetAtTime(inTunnel ? 0.42 : 0, now, inTunnel ? 0.12 : 0.025);
+    this.echoFeedback.gain.setTargetAtTime(inTunnel ? 0.24 : 0, now, inTunnel ? 0.12 : 0.025);
+  }
+
+  playTunnelSwoosh(normalizedSpeed: number, pan: number): void {
+    const now = this.context.currentTime;
+    if (now - this.lastSwooshTime < 0.28) return;
+    this.lastSwooshTime = now;
+
+    const amount = THREE.MathUtils.clamp(normalizedSpeed, 0, 1);
+    const source = this.context.createBufferSource();
+    source.buffer = this.swooshBuffer;
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.Q.value = 0.7;
+    filter.frequency.setValueAtTime(1900, now);
+    filter.frequency.exponentialRampToValueAtTime(420, now + 0.24);
+    const envelope = this.context.createGain();
+    envelope.gain.setValueAtTime(0.0001, now);
+    envelope.gain.exponentialRampToValueAtTime(0.035 + amount * 0.035, now + 0.025);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    const panner = this.context.createStereoPanner();
+    panner.pan.value = THREE.MathUtils.clamp(pan, -1, 1);
+
+    source.connect(filter).connect(envelope).connect(panner).connect(this.master);
+    source.start(now);
+    source.stop(now + 0.25);
   }
 
   private refreshMaster(): void {
@@ -1039,6 +1073,23 @@ function beginJump(gap: JumpGap, rampSlope: number): void {
   runState.textContent = 'IN FLIGHT';
 }
 
+function playTunnelLineSwoosh(previousDistance: number, currentDistance: number): void {
+  if (!speedAudio || airborne || currentDistance <= previousDistance) return;
+  const section = TUNNELS.find(({ start, end }) => currentDistance >= start && currentDistance <= end);
+  if (!section) return;
+
+  const nextRegularLine = previousDistance < section.start
+    ? section.start
+    : section.start
+      + (Math.floor((previousDistance - section.start) / TUNNEL_RING_SPACING) + 1) * TUNNEL_RING_SPACING;
+  const nextLine = Math.min(nextRegularLine, section.end);
+  if (nextLine <= currentDistance) {
+    const wallDistance = HALF_WIDTH - PLAYER_COLLISION_RADIUS - Math.abs(lateralOffset);
+    const proximity = THREE.MathUtils.clamp((5.5 - wallDistance) / 5.5, 0, 1);
+    speedAudio.playTunnelSwoosh(speed / MAX_SPEED, Math.sign(lateralOffset) * proximity);
+  }
+}
+
 function completeJump(gap: JumpGap): void {
   const landingDistance = airLaunchDistance + airLaunchSpeed * airFlightTime;
   const landingCenterY = pathCenter(landingDistance).y;
@@ -1179,6 +1230,7 @@ function updateDriving(deltaTime: number): void {
       }
       beginJump(nextGap, rampSlope);
     }
+    if (!airborne) playTunnelLineSwoosh(previousDistance, distance);
   }
 
   if (!airborne && distance >= LEVEL_ENDS[currentLevel - 1]) advanceLevel();
