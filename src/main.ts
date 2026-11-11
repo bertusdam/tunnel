@@ -873,7 +873,7 @@ class SpeedAudio {
     this.echoFeedback.gain.setTargetAtTime(inTunnel ? 0.24 : 0, now, inTunnel ? 0.12 : 0.025);
   }
 
-  playTunnelSwoosh(normalizedSpeed: number, pan: number): void {
+  playTunnelSwoosh(normalizedSpeed: number, wallProximity: number, pan: number): void {
     const now = this.context.currentTime;
     if (now - this.lastSwooshTime < 0.28) return;
     this.lastSwooshTime = now;
@@ -881,6 +881,8 @@ class SpeedAudio {
     const amount = THREE.MathUtils.clamp(normalizedSpeed, 0, 1);
     const source = this.context.createBufferSource();
     source.buffer = this.swooshBuffer;
+    const proximity = THREE.MathUtils.clamp(wallProximity, 0, 1);
+    const peakGain = 0.00015 + amount ** 2 * (0.001 + proximity * 0.018);
     const filter = this.context.createBiquadFilter();
     filter.type = 'bandpass';
     filter.Q.value = 0.7;
@@ -888,7 +890,7 @@ class SpeedAudio {
     filter.frequency.exponentialRampToValueAtTime(420, now + 0.24);
     const envelope = this.context.createGain();
     envelope.gain.setValueAtTime(0.0001, now);
-    envelope.gain.exponentialRampToValueAtTime(0.035 + amount * 0.035, now + 0.025);
+    envelope.gain.exponentialRampToValueAtTime(peakGain, now + 0.025);
     envelope.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
     const panner = this.context.createStereoPanner();
     panner.pan.value = THREE.MathUtils.clamp(pan, -1, 1);
@@ -1086,7 +1088,11 @@ function playTunnelLineSwoosh(previousDistance: number, currentDistance: number)
   if (nextLine <= currentDistance) {
     const wallDistance = HALF_WIDTH - PLAYER_COLLISION_RADIUS - Math.abs(lateralOffset);
     const proximity = THREE.MathUtils.clamp((5.5 - wallDistance) / 5.5, 0, 1);
-    speedAudio.playTunnelSwoosh(speed / MAX_SPEED, Math.sign(lateralOffset) * proximity);
+    speedAudio.playTunnelSwoosh(
+      speed / MAX_SPEED,
+      proximity,
+      Math.sign(lateralOffset) * proximity,
+    );
   }
 }
 
