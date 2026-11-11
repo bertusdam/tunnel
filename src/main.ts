@@ -763,10 +763,10 @@ class SpeedAudio {
     this.echoSend = this.context.createGain();
     this.echoSend.gain.value = 0;
     this.echoDelay = this.context.createDelay(0.5);
-    this.echoDelay.delayTime.value = 0.19;
+    this.echoDelay.delayTime.value = 0.24;
     this.echoFilter = this.context.createBiquadFilter();
     this.echoFilter.type = 'lowpass';
-    this.echoFilter.frequency.value = 1700;
+    this.echoFilter.frequency.value = 2400;
     this.echoFeedback = this.context.createGain();
     this.echoFeedback.gain.value = 0;
     this.echoReturn = this.context.createGain();
@@ -822,18 +822,18 @@ class SpeedAudio {
     const now = this.context.currentTime;
     const amount = THREE.MathUtils.clamp(normalizedSpeed, 0, 1);
     const proximity = THREE.MathUtils.clamp(wallProximity, 0, 1);
-    const engineFrequency = 45 + amount * 100 + proximity * 7;
+    const engineFrequency = 45 + amount * 100;
     this.engine.frequency.setTargetAtTime(engineFrequency, now, 0.08);
     this.engineOvertone.frequency.setTargetAtTime(engineFrequency * 2.01, now, 0.08);
-    this.engineFilter.frequency.setTargetAtTime(300 + amount * 1250 + proximity * 900, now, 0.1);
+    this.engineFilter.frequency.setTargetAtTime(300 + amount * 1250, now, 0.1);
     this.engineGain.gain.setTargetAtTime(0.018 + amount * 0.04, now, 0.12);
-    this.overtoneGain.gain.setTargetAtTime(0.004 + amount * 0.014 + proximity * 0.012, now, 0.12);
+    this.overtoneGain.gain.setTargetAtTime(0.004 + amount * 0.014, now, 0.12);
     this.engineVibrato.frequency.setTargetAtTime(3 + amount * 5, now, 0.12);
-    this.vibratoDepth.gain.setTargetAtTime(0.25 + amount * 1.1 + proximity * 0.8, now, 0.12);
+    this.vibratoDepth.gain.setTargetAtTime(0.25 + amount * 1.1, now, 0.12);
     this.wallPanner.pan.setTargetAtTime(wallSide * proximity * 0.7, now, 0.14);
-    this.echoSend.gain.setTargetAtTime(inTunnel ? 0.2 : 0, now, inTunnel ? 0.12 : 0.025);
-    this.echoReturn.gain.setTargetAtTime(inTunnel ? 0.32 : 0, now, inTunnel ? 0.12 : 0.025);
-    this.echoFeedback.gain.setTargetAtTime(inTunnel ? 0.28 : 0, now, inTunnel ? 0.12 : 0.025);
+    this.echoSend.gain.setTargetAtTime(inTunnel ? 0.75 : 0, now, inTunnel ? 0.12 : 0.025);
+    this.echoReturn.gain.setTargetAtTime(inTunnel ? 0.62 : 0, now, inTunnel ? 0.12 : 0.025);
+    this.echoFeedback.gain.setTargetAtTime(inTunnel ? 0.36 : 0, now, inTunnel ? 0.12 : 0.025);
   }
 
   private refreshMaster(): void {
