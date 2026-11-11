@@ -738,6 +738,8 @@ class SpeedAudio {
   private engine: OscillatorNode;
   private engineFilter: BiquadFilterNode;
   private engineGain: GainNode;
+  private engineSub: OscillatorNode;
+  private subGain: GainNode;
   private engineOvertone: OscillatorNode;
   private overtoneGain: GainNode;
   private engineVibrato: OscillatorNode;
@@ -776,15 +778,39 @@ class SpeedAudio {
     this.echoDelay.connect(this.echoFilter).connect(this.echoFeedback).connect(this.echoDelay);
 
     this.engine = this.context.createOscillator();
-    this.engine.type = 'triangle';
-    this.engine.frequency.value = 48;
+    const harmonicReal = new Float32Array(9);
+    const harmonicImaginary = new Float32Array(9);
+    harmonicImaginary[1] = 1;
+    harmonicImaginary[2] = 0.62;
+    harmonicImaginary[3] = 0.4;
+    harmonicImaginary[4] = 0.28;
+    harmonicImaginary[5] = 0.2;
+    harmonicImaginary[6] = 0.14;
+    harmonicImaginary[7] = 0.1;
+    harmonicImaginary[8] = 0.07;
+    harmonicReal[2] = 0.12;
+    harmonicReal[4] = 0.08;
+    this.engine.setPeriodicWave(this.context.createPeriodicWave(
+      harmonicReal,
+      harmonicImaginary,
+      { disableNormalization: true },
+    ));
+    this.engine.frequency.value = 32;
     this.engineFilter = this.context.createBiquadFilter();
     this.engineFilter.type = 'lowpass';
-    this.engineFilter.frequency.value = 320;
+    this.engineFilter.frequency.value = 480;
     this.engineGain = this.context.createGain();
-    this.engineGain.gain.value = 0.025;
+    this.engineGain.gain.value = 0.028;
     this.engine.connect(this.engineFilter).connect(this.engineGain).connect(this.wallPanner);
     this.engine.start();
+
+    this.engineSub = this.context.createOscillator();
+    this.engineSub.type = 'sine';
+    this.engineSub.frequency.value = 16;
+    this.subGain = this.context.createGain();
+    this.subGain.gain.value = 0.012;
+    this.engineSub.connect(this.subGain).connect(this.wallPanner);
+    this.engineSub.start();
 
     this.engineOvertone = this.context.createOscillator();
     this.engineOvertone.type = 'sine';
@@ -822,14 +848,16 @@ class SpeedAudio {
     const now = this.context.currentTime;
     const amount = THREE.MathUtils.clamp(normalizedSpeed, 0, 1);
     const proximity = THREE.MathUtils.clamp(wallProximity, 0, 1);
-    const engineFrequency = 45 + amount * 100;
+    const engineFrequency = 32 + amount * 82;
     this.engine.frequency.setTargetAtTime(engineFrequency, now, 0.08);
+    this.engineSub.frequency.setTargetAtTime(engineFrequency * 0.5, now, 0.08);
     this.engineOvertone.frequency.setTargetAtTime(engineFrequency * 2.01, now, 0.08);
-    this.engineFilter.frequency.setTargetAtTime(300 + amount * 1250, now, 0.1);
-    this.engineGain.gain.setTargetAtTime(0.018 + amount * 0.04, now, 0.12);
-    this.overtoneGain.gain.setTargetAtTime(0.004 + amount * 0.014, now, 0.12);
-    this.engineVibrato.frequency.setTargetAtTime(3 + amount * 5, now, 0.12);
-    this.vibratoDepth.gain.setTargetAtTime(0.25 + amount * 1.1, now, 0.12);
+    this.engineFilter.frequency.setTargetAtTime(480 + amount * 2100, now, 0.1);
+    this.engineGain.gain.setTargetAtTime(0.028 + amount * 0.052, now, 0.12);
+    this.subGain.gain.setTargetAtTime(0.012 + amount * 0.025, now, 0.12);
+    this.overtoneGain.gain.setTargetAtTime(0.004 + amount * 0.012, now, 0.12);
+    this.engineVibrato.frequency.setTargetAtTime(2.2 + amount * 3.5, now, 0.12);
+    this.vibratoDepth.gain.setTargetAtTime(0.12 + amount * 0.45, now, 0.12);
     this.wallPanner.pan.setTargetAtTime(wallSide * proximity * 0.7, now, 0.14);
     this.echoSend.gain.setTargetAtTime(inTunnel ? 0.75 : 0, now, inTunnel ? 0.12 : 0.025);
     this.echoReturn.gain.setTargetAtTime(inTunnel ? 0.62 : 0, now, inTunnel ? 0.12 : 0.025);
