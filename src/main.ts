@@ -738,8 +738,10 @@ class SpeedAudio {
   private engine: OscillatorNode;
   private engineFilter: BiquadFilterNode;
   private engineGain: GainNode;
-  private windFilter: BiquadFilterNode;
-  private windGain: GainNode;
+  private engineOvertone: OscillatorNode;
+  private overtoneGain: GainNode;
+  private engineVibrato: OscillatorNode;
+  private vibratoDepth: GainNode;
   private paused = false;
   private muted = false;
 
@@ -751,7 +753,7 @@ class SpeedAudio {
     this.master.connect(this.context.destination);
 
     this.engine = this.context.createOscillator();
-    this.engine.type = 'sawtooth';
+    this.engine.type = 'triangle';
     this.engine.frequency.value = 48;
     this.engineFilter = this.context.createBiquadFilter();
     this.engineFilter.type = 'lowpass';
@@ -761,20 +763,21 @@ class SpeedAudio {
     this.engine.connect(this.engineFilter).connect(this.engineGain).connect(this.master);
     this.engine.start();
 
-    const bufferLength = this.context.sampleRate * 2;
-    const noiseBuffer = this.context.createBuffer(1, bufferLength, this.context.sampleRate);
-    const channel = noiseBuffer.getChannelData(0);
-    for (let index = 0; index < bufferLength; index += 1) channel[index] = Math.random() * 2 - 1;
-    const noise = this.context.createBufferSource();
-    noise.buffer = noiseBuffer;
-    noise.loop = true;
-    this.windFilter = this.context.createBiquadFilter();
-    this.windFilter.type = 'highpass';
-    this.windFilter.frequency.value = 450;
-    this.windGain = this.context.createGain();
-    this.windGain.gain.value = 0;
-    noise.connect(this.windFilter).connect(this.windGain).connect(this.master);
-    noise.start();
+    this.engineOvertone = this.context.createOscillator();
+    this.engineOvertone.type = 'sine';
+    this.engineOvertone.frequency.value = 96;
+    this.overtoneGain = this.context.createGain();
+    this.overtoneGain.gain.value = 0.004;
+    this.engineOvertone.connect(this.overtoneGain).connect(this.master);
+    this.engineOvertone.start();
+
+    this.engineVibrato = this.context.createOscillator();
+    this.engineVibrato.type = 'sine';
+    this.engineVibrato.frequency.value = 3;
+    this.vibratoDepth = this.context.createGain();
+    this.vibratoDepth.gain.value = 0.25;
+    this.engineVibrato.connect(this.vibratoDepth).connect(this.engine.frequency);
+    this.engineVibrato.start();
   }
 
   async resume(): Promise<void> {
@@ -795,11 +798,14 @@ class SpeedAudio {
   update(normalizedSpeed: number): void {
     const now = this.context.currentTime;
     const amount = THREE.MathUtils.clamp(normalizedSpeed, 0, 1);
-    this.engine.frequency.setTargetAtTime(45 + amount * 100, now, 0.08);
+    const engineFrequency = 45 + amount * 100;
+    this.engine.frequency.setTargetAtTime(engineFrequency, now, 0.08);
+    this.engineOvertone.frequency.setTargetAtTime(engineFrequency * 2.01, now, 0.08);
     this.engineFilter.frequency.setTargetAtTime(300 + amount * 1250, now, 0.1);
     this.engineGain.gain.setTargetAtTime(0.018 + amount * 0.04, now, 0.12);
-    this.windFilter.frequency.setTargetAtTime(400 + amount * 950, now, 0.12);
-    this.windGain.gain.setTargetAtTime(amount * 0.075, now, 0.16);
+    this.overtoneGain.gain.setTargetAtTime(0.004 + amount * 0.014, now, 0.12);
+    this.engineVibrato.frequency.setTargetAtTime(3 + amount * 5, now, 0.12);
+    this.vibratoDepth.gain.setTargetAtTime(0.25 + amount * 1.1, now, 0.12);
   }
 
   private refreshMaster(): void {
