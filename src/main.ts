@@ -882,7 +882,7 @@ class SpeedAudio {
     const source = this.context.createBufferSource();
     source.buffer = this.swooshBuffer;
     const proximity = THREE.MathUtils.clamp(wallProximity, 0, 1);
-    const peakGain = 0.00015 + amount ** 2 * (0.001 + proximity * 0.018);
+    const peakGain = 0.0003 + amount ** 2 * (0.004 + proximity * 0.09);
     const filter = this.context.createBiquadFilter();
     filter.type = 'bandpass';
     filter.Q.value = 0.7;
