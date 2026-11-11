@@ -739,6 +739,11 @@ class SpeedAudio {
   private engine: OscillatorNode;
   private engineFilter: BiquadFilterNode;
   private engineGain: GainNode;
+  private engineBank: OscillatorNode;
+  private bankFilter: BiquadFilterNode;
+  private bankGain: GainNode;
+  private bankPulse: OscillatorNode;
+  private bankPulseDepth: GainNode;
   private engineSub: OscillatorNode;
   private subGain: GainNode;
   private engineOvertone: OscillatorNode;
@@ -799,11 +804,12 @@ class SpeedAudio {
     harmonicImaginary[8] = 0.07;
     harmonicReal[2] = 0.12;
     harmonicReal[4] = 0.08;
-    this.engine.setPeriodicWave(this.context.createPeriodicWave(
+    const v8Wave = this.context.createPeriodicWave(
       harmonicReal,
       harmonicImaginary,
       { disableNormalization: true },
-    ));
+    );
+    this.engine.setPeriodicWave(v8Wave);
     this.engine.frequency.value = 32;
     this.engineFilter = this.context.createBiquadFilter();
     this.engineFilter.type = 'lowpass';
@@ -812,6 +818,26 @@ class SpeedAudio {
     this.engineGain.gain.value = 0.028;
     this.engine.connect(this.engineFilter).connect(this.engineGain).connect(this.wallPanner);
     this.engine.start();
+
+    this.engineBank = this.context.createOscillator();
+    this.engineBank.setPeriodicWave(v8Wave);
+    this.engineBank.frequency.value = 32.2;
+    this.bankFilter = this.context.createBiquadFilter();
+    this.bankFilter.type = 'bandpass';
+    this.bankFilter.frequency.value = 520;
+    this.bankFilter.Q.value = 0.65;
+    this.bankGain = this.context.createGain();
+    this.bankGain.gain.value = 0.009;
+    this.engineBank.connect(this.bankFilter).connect(this.bankGain).connect(this.wallPanner);
+    this.engineBank.start();
+
+    this.bankPulse = this.context.createOscillator();
+    this.bankPulse.type = 'sine';
+    this.bankPulse.frequency.value = 2.4;
+    this.bankPulseDepth = this.context.createGain();
+    this.bankPulseDepth.gain.value = 0.0025;
+    this.bankPulse.connect(this.bankPulseDepth).connect(this.bankGain.gain);
+    this.bankPulse.start();
 
     this.engineSub = this.context.createOscillator();
     this.engineSub.type = 'sine';
@@ -853,16 +879,28 @@ class SpeedAudio {
     this.refreshMaster();
   }
 
-  update(normalizedSpeed: number, wallProximity: number, wallSide: number, inTunnel: boolean): void {
+  update(
+    normalizedSpeed: number,
+    wallProximity: number,
+    wallSide: number,
+    inTunnel: boolean,
+    engineLoad: number,
+  ): void {
     const now = this.context.currentTime;
     const amount = THREE.MathUtils.clamp(normalizedSpeed, 0, 1);
     const proximity = THREE.MathUtils.clamp(wallProximity, 0, 1);
+    const load = THREE.MathUtils.clamp(engineLoad, 0, 1);
     const engineFrequency = 32 + amount * 82;
     this.engine.frequency.setTargetAtTime(engineFrequency, now, 0.08);
+    this.engineBank.frequency.setTargetAtTime(engineFrequency * (1.006 + load * 0.004), now, 0.08);
     this.engineSub.frequency.setTargetAtTime(engineFrequency * 0.5, now, 0.08);
     this.engineOvertone.frequency.setTargetAtTime(engineFrequency * 2.01, now, 0.08);
-    this.engineFilter.frequency.setTargetAtTime(480 + amount * 2100, now, 0.1);
-    this.engineGain.gain.setTargetAtTime(0.028 + amount * 0.052, now, 0.12);
+    this.engineFilter.frequency.setTargetAtTime(480 + amount * 2100 + load * 650, now, 0.1);
+    this.engineGain.gain.setTargetAtTime(0.028 + amount * 0.052 + load * 0.014, now, 0.12);
+    this.bankFilter.frequency.setTargetAtTime(520 + amount * 480 + load * 620, now, 0.1);
+    this.bankGain.gain.setTargetAtTime(0.009 + amount * 0.012 + load * 0.012, now, 0.12);
+    this.bankPulse.frequency.setTargetAtTime(2.4 + amount * 7.5, now, 0.15);
+    this.bankPulseDepth.gain.setTargetAtTime(0.0025 + amount * 0.004, now, 0.12);
     this.subGain.gain.setTargetAtTime(0.012 + amount * 0.025, now, 0.12);
     this.overtoneGain.gain.setTargetAtTime(0.004 + amount * 0.012, now, 0.12);
     this.engineVibrato.frequency.setTargetAtTime(2.2 + amount * 3.5, now, 0.12);
@@ -1411,7 +1449,16 @@ function animate(time: number): void {
   const wallDistance = HALF_WIDTH - PLAYER_COLLISION_RADIUS - Math.abs(lateralOffset);
   const wallProximity = THREE.MathUtils.clamp((5.5 - wallDistance) / 5.5, 0, 1);
   const insideTunnel = !airborne && TUNNELS.some((section) => distance >= section.start && distance <= section.end);
-  speedAudio?.update(speed / MAX_SPEED, wallProximity, Math.sign(lateralOffset), gameState === 'playing' && insideTunnel);
+  const throttleHeld = pressedKeys.has('arrowup') || pressedKeys.has('w');
+  const brakeHeld = pressedKeys.has('arrowdown') || pressedKeys.has('s');
+  const engineLoad = gameState !== 'playing' ? 0 : throttleHeld ? 1 : brakeHeld ? 0.42 : 0.18;
+  speedAudio?.update(
+    speed / MAX_SPEED,
+    wallProximity,
+    Math.sign(lateralOffset),
+    gameState === 'playing' && insideTunnel,
+    engineLoad,
+  );
 
   if (gameState === 'playing' && time - lastUiUpdate > 80) {
     updateHud();
