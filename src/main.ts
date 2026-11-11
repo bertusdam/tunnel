@@ -759,7 +759,7 @@ class SpeedAudio {
   constructor() {
     const AudioContextConstructor = window.AudioContext;
     this.context = new AudioContextConstructor();
-    const swooshLength = Math.floor(this.context.sampleRate * 0.24);
+    const swooshLength = Math.floor(this.context.sampleRate * 0.55);
     this.swooshBuffer = this.context.createBuffer(1, swooshLength, this.context.sampleRate);
     const swooshSamples = this.swooshBuffer.getChannelData(0);
     for (let index = 0; index < swooshLength; index += 1) {
@@ -886,18 +886,19 @@ class SpeedAudio {
     const filter = this.context.createBiquadFilter();
     filter.type = 'bandpass';
     filter.Q.value = 0.7;
-    filter.frequency.setValueAtTime(1900, now);
-    filter.frequency.exponentialRampToValueAtTime(420, now + 0.24);
+    filter.frequency.setValueAtTime(2600, now);
+    filter.frequency.exponentialRampToValueAtTime(320, now + 0.5);
     const envelope = this.context.createGain();
     envelope.gain.setValueAtTime(0.0001, now);
-    envelope.gain.exponentialRampToValueAtTime(peakGain, now + 0.025);
-    envelope.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    envelope.gain.exponentialRampToValueAtTime(peakGain, now + 0.12);
+    envelope.gain.exponentialRampToValueAtTime(peakGain * 0.55, now + 0.26);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, now + 0.52);
     const panner = this.context.createStereoPanner();
     panner.pan.value = THREE.MathUtils.clamp(pan, -1, 1);
 
     source.connect(filter).connect(envelope).connect(panner).connect(this.master);
     source.start(now);
-    source.stop(now + 0.25);
+    source.stop(now + 0.53);
   }
 
   private refreshMaster(): void {
