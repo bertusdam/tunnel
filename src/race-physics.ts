@@ -1,3 +1,5 @@
+import { getLevel } from './levels';
+
 export const MAX_SPEED = 210;
 export const MAX_LEVEL = 20;
 export const MAX_DISPLAY_SPEED = 120;
@@ -34,62 +36,14 @@ export interface SharpTurn {
   strength: number;
 }
 
-const SHARP_TURN_LAYOUT = [
-  { center: 500, length: 160, direction: 1 },
-  { center: 1050, length: 160, direction: -1 },
-  { center: 2000, length: 160, direction: 1 },
-  { center: 2600, length: 160, direction: -1 },
-  { center: 3800, length: 160, direction: 1 },
-  { center: 4250, length: 160, direction: -1 },
-  { center: 4700, length: 160, direction: 1 },
-  { center: 5150, length: 160, direction: -1 },
-] as const;
-const SHARP_TURN_CURVATURE = 0.00135;
-
-interface TrackPattern {
-  frequency: readonly [number, number, number, number, number];
-  amplitude: readonly [number, number, number, number, number];
-  phase: readonly [number, number, number, number, number];
-}
-
-const TURN_PATTERNS: readonly TrackPattern[] = [
-  { frequency: [1, 1, 1, 1, 1], amplitude: [1, 1, 1, 1, 1], phase: [0, 0, 0, 0, 0] },
-  { frequency: [0.86, 1.22, 0.94, 1.28, 1.12], amplitude: [1.15, 0.82, 1.08, 0.9, 0.78], phase: [0, 0.45, -0.5, 1.1, -0.8] },
-  { frequency: [1.2, 0.9, 1.28, 0.92, 1.18], amplitude: [0.82, 1.16, 0.88, 1.2, 1.1], phase: [0.4, -0.7, 0.9, -1.2, 1.5] },
-  { frequency: [0.94, 1.32, 0.86, 1.18, 1.35], amplitude: [1.08, 0.76, 1.18, 1.05, 0.72], phase: [-0.5, 0.9, 1.4, -0.6, 2] },
-  { frequency: [1.3, 0.82, 1.08, 1.36, 0.94], amplitude: [0.78, 1.24, 0.94, 0.78, 1.28], phase: [0.8, -1.1, 0.3, 1.8, -1.5] },
-];
-
-const TERRAIN_PATTERNS: readonly TrackPattern[] = [
-  { frequency: [1, 1, 1, 1, 1], amplitude: [1, 1, 1, 1, 1], phase: [0, 0, 0, 0, 0] },
-  { frequency: [0.82, 1.3, 0.94, 1.24, 1.1], amplitude: [1.18, 0.8, 1.08, 0.92, 0.76], phase: [0.4, -0.8, 1.1, 0.2, -1.4] },
-  { frequency: [1.22, 0.84, 1.32, 0.9, 1.26], amplitude: [0.86, 1.2, 0.82, 1.18, 0.9], phase: [-0.7, 0.9, -1.1, 1.4, 0.6] },
-  { frequency: [0.94, 1.36, 0.8, 1.18, 1.4], amplitude: [1.08, 0.76, 1.24, 0.86, 0.78], phase: [1, 0.3, 1.6, -1.3, 1.9] },
-  { frequency: [1.32, 0.92, 1.14, 1.34, 0.84], amplitude: [0.8, 1.14, 0.92, 0.78, 1.2], phase: [-1, 1.2, 0.5, 1.8, -0.4] },
-];
-
-const LEVEL_PATTERN_ORDER = [0, 1, 2, 3, 4, 2, 4, 1, 3, 0, 3, 0, 4, 2, 1, 4, 3, 0, 1, 2] as const;
-const TURN_AMPLITUDES = [28, 11, 4.5, 2.4, 2.4] as const;
-const TURN_FREQUENCIES = [0.00235, 0.0048, 0.0088, 0.0132, 0.0175] as const;
-const BROAD_TURN_LENGTH_SCALE = 1.25;
-const LEVEL_ONE_CURVE_SCALE = 1.05;
-const TERRAIN_AMPLITUDES = [6.2, 2.6, 1.2] as const;
-const TERRAIN_FREQUENCIES = [0.0026, 0.0071, 0.015] as const;
-const JUMP_TERRAIN_ZONES = [
-  { start: 1320, end: 1740 },
-  { start: 3020, end: 3460 },
-] as const;
+const SHARP_TURN_CURVATURE = 0.0007;
 const JUMP_TERRAIN_SCALE = 0.08;
 const JUMP_TERRAIN_BLEND = 120;
 
-function trackPattern(level: number, patterns: readonly TrackPattern[]): TrackPattern {
-  const clampedLevel = Math.max(1, Math.min(MAX_LEVEL, Math.floor(level)));
-  return patterns[LEVEL_PATTERN_ORDER[clampedLevel - 1]];
-}
-
-function terrainVariationScale(distance: number): number {
+function terrainVariationScale(distance: number, level: number): number {
   let scale = 1;
-  for (const zone of JUMP_TERRAIN_ZONES) {
+  for (const jump of getLevel(level).jumps) {
+    const zone = { start: jump.launch - 180, end: jump.landing + 180 };
     if (distance >= zone.start && distance <= zone.end) return JUMP_TERRAIN_SCALE;
 
     const blendStart = zone.start - JUMP_TERRAIN_BLEND;
@@ -110,20 +64,11 @@ export function levelTurnSharpness(level: number): number {
 }
 
 export function levelOneCurveScale(): number {
-  return LEVEL_ONE_CURVE_SCALE;
-}
-
-function broadCurveScale(level: number): number {
-  return Math.floor(level) === 1 ? LEVEL_ONE_CURVE_SCALE : 1;
+  return getLevel(1).track.curveScale;
 }
 
 export function sharpTurnsForLevel(level: number): SharpTurn[] {
-  const clampedLevel = Math.max(1, Math.min(MAX_LEVEL, Math.floor(level)));
-  if (clampedLevel === 1) return [];
-
-  const turnCount = Math.ceil((clampedLevel - 1) * SHARP_TURN_LAYOUT.length / (MAX_LEVEL - 1));
-  const strength = 6;
-  return SHARP_TURN_LAYOUT.slice(0, turnCount).map((turn) => ({ ...turn, strength }));
+  return getLevel(level).sharpTurns.map((turn) => ({ ...turn }));
 }
 
 export function levelAtDistance(distance: number, levelLength: number): number {
@@ -255,7 +200,7 @@ function authoredTurnProfile(distance: number, turn: SharpTurn, sharpness: numbe
   const start = turn.center - turn.length / 2;
   const end = turn.center + turn.length / 2;
   const turnLength = turn.length;
-  const recoveryLength = turnLength * 2.5;
+  const recoveryLength = turnLength * 1.5;
   const curvatureScale = turn.direction * SHARP_TURN_CURVATURE * turn.strength * sharpness;
   const turnOffsetAtEnd = curvatureScale * turnLength ** 2 / 4;
   const turnSlopeAtEnd = curvatureScale * turnLength / 2;
@@ -296,12 +241,10 @@ export interface TransferPrediction {
 
 export function trackX(distance: number, level = 1): number {
   const sharpness = levelTurnSharpness(level);
-  const pattern = trackPattern(level, TURN_PATTERNS);
-  const curveScale = broadCurveScale(level);
-  const baseTrackX = TURN_AMPLITUDES.reduce((sum, amplitude, index) => {
-    const frequency = TURN_FREQUENCIES[index] / BROAD_TURN_LENGTH_SCALE
-      * sharpness * pattern.frequency[index];
-    return sum + curveScale * amplitude * pattern.amplitude[index] * Math.sin(distance * frequency + pattern.phase[index]);
+  const profile = getLevel(level).track;
+  const baseTrackX = profile.curveAmplitude.reduce((sum, amplitude, index) => {
+    const frequency = profile.curveFrequency[index] * sharpness;
+    return sum + profile.curveScale * amplitude * Math.sin(distance * frequency + profile.curvePhase[index]);
   }, 0);
   const sharpTurnOffset = sharpTurnsForLevel(level).reduce(
     (sum, turn) => sum + authoredTurnProfile(distance, turn, sharpness).offset,
@@ -313,25 +256,22 @@ export function trackX(distance: number, level = 1): number {
 export function rawTrackHeight(distance: number, level = 1): number {
   const clampedLevel = Math.max(1, Math.min(MAX_LEVEL, Math.floor(level)));
   const sharpness = levelTurnSharpness(clampedLevel);
-  const hillScale = 1 + (clampedLevel - 1) * 0.018;
-  const terrainScale = terrainVariationScale(distance);
-  const pattern = trackPattern(clampedLevel, TERRAIN_PATTERNS);
-  return TERRAIN_AMPLITUDES.reduce((sum, amplitude, index) => {
-    const frequency = TERRAIN_FREQUENCIES[index] * sharpness * pattern.frequency[index];
-    return sum + amplitude * hillScale * terrainScale * pattern.amplitude[index]
-      * Math.sin(distance * frequency + pattern.phase[index]);
+  const profile = getLevel(clampedLevel).track;
+  const terrainScale = terrainVariationScale(distance, clampedLevel);
+  return profile.terrainAmplitude.reduce((sum, amplitude, index) => {
+    const frequency = profile.terrainFrequency[index] * sharpness;
+    return sum + amplitude * profile.terrainScale * terrainScale
+      * Math.sin(distance * frequency + profile.terrainPhase[index]);
   }, 0);
 }
 
 export function curveAtDistance(distance: number, level = 1): number {
   const sharpness = levelTurnSharpness(level);
-  const pattern = trackPattern(level, TURN_PATTERNS);
-  const curveScale = broadCurveScale(level);
-  const baseCurve = -TURN_AMPLITUDES.reduce((sum, amplitude, index) => {
-    const frequency = TURN_FREQUENCIES[index] / BROAD_TURN_LENGTH_SCALE
-      * sharpness * pattern.frequency[index];
-    return sum + curveScale * amplitude * pattern.amplitude[index] * frequency ** 2
-      * Math.sin(distance * frequency + pattern.phase[index]);
+  const profile = getLevel(level).track;
+  const baseCurve = -profile.curveAmplitude.reduce((sum, amplitude, index) => {
+    const frequency = profile.curveFrequency[index] * sharpness;
+    return sum + profile.curveScale * amplitude * frequency ** 2
+      * Math.sin(distance * frequency + profile.curvePhase[index]);
   }, 0);
   const sharpTurnCurve = sharpTurnsForLevel(level).reduce(
     (sum, turn) => sum + authoredTurnProfile(distance, turn, sharpness).curvature,

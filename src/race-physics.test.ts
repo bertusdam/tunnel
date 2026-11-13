@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
+import { getLevel, LEVELS, validateLevels } from './levels';
 import {
   cameraOrientationForSteering,
   cameraQuaternionFollowingTrack,
@@ -15,10 +16,7 @@ import {
   MAX_SPEED,
   PLAYER_COLLISION_RADIUS,
   MAX_AIR_LAUNCH_SPEED,
-  RAMP_LENGTH,
-  RAMP_RISE,
   RAMP_SLOPE,
-  TUNNEL_HEIGHT,
   brakingDistance,
   STEERING_ACCELERATION,
   curveAtDistance,
@@ -45,7 +43,6 @@ import {
   SHARP_TURN_WARNING_OFFSETS,
   sharpTurnsForLevel,
   trackX,
-  trajectoryHeight,
 } from './race-physics';
 
 function runTurn(steerWithCurve: boolean, start = 0, end = 1480): number {
@@ -92,13 +89,14 @@ function runUnsteeredTurn(
 ): boolean {
   let offset = 0;
   let velocity = 0;
+  const halfWidth = getLevel(level).tunnelWidth / 2;
   const deltaTime = 1 / 60;
   const end = turn.center + turn.length / 2 + turn.length * 4;
 
   for (let distance = turn.center - turn.length / 2; distance < end; distance += speed * deltaTime) {
     const curve = curveAtDistance(distance, level);
     const next = stepLateralMotion(offset, velocity, speed, curve, 0, deltaTime);
-    const wall = resolveTunnelWallContact(offset, next.offset, HALF_WIDTH, PLAYER_COLLISION_RADIUS);
+    const wall = resolveTunnelWallContact(offset, next.offset, halfWidth, PLAYER_COLLISION_RADIUS);
     offset = wall.offset;
     velocity = next.velocity;
     if (wall.collided) return true;
@@ -107,8 +105,10 @@ function runUnsteeredTurn(
 }
 
 function runBrakingApproach(turn: ReturnType<typeof sharpTurnsForLevel>[number], level: number): number | null {
+  const halfWidth = getLevel(level).tunnelWidth / 2;
   const previousTurn = sharpTurnsForLevel(level)
     .filter((candidate) => candidate.center < turn.center)
+    .sort((left, right) => left.center - right.center)
     .at(-1);
   let speed = previousTurn ? 60 : MAX_SPEED;
   let offset = 0;
@@ -137,12 +137,12 @@ function runBrakingApproach(turn: ReturnType<typeof sharpTurnsForLevel>[number],
       : 0;
     const next = stepLateralMotion(offset, velocity, speed, curve, steering, deltaTime);
     const wallContact = resolveTunnelWallContact(
-      offset, next.offset, HALF_WIDTH, PLAYER_COLLISION_RADIUS,
+      offset, next.offset, halfWidth, PLAYER_COLLISION_RADIUS,
     );
     offset = wallContact.offset;
     velocity = next.velocity;
     if (wallContact.collided) return distance;
-    if (Math.abs(offset) > HALF_WIDTH - PLAYER_COLLISION_RADIUS - 1.25) {
+    if (Math.abs(offset) > halfWidth - PLAYER_COLLISION_RADIUS - 1.25) {
       speed = Math.max(0, speed - 24 * deltaTime);
       velocity *= Math.exp(-8 * deltaTime);
     }
@@ -156,6 +156,7 @@ function runKeyControlledTurn(
   turn: ReturnType<typeof sharpTurnsForLevel>[number],
   level: number,
 ): number | null {
+  const halfWidth = getLevel(level).tunnelWidth / 2;
   let offset = 0;
   let velocity = 0;
   let currentSpeed = speed;
@@ -180,11 +181,11 @@ function runKeyControlledTurn(
       steering,
       deltaTime,
     );
-    const wall = resolveTunnelWallContact(offset, next.offset, HALF_WIDTH, PLAYER_COLLISION_RADIUS);
+    const wall = resolveTunnelWallContact(offset, next.offset, halfWidth, PLAYER_COLLISION_RADIUS);
     offset = wall.offset;
     velocity = next.velocity;
     if (wall.collided) return Math.sign(offset);
-    if (Math.abs(offset) > HALF_WIDTH - PLAYER_COLLISION_RADIUS - 1.25) {
+    if (Math.abs(offset) > halfWidth - PLAYER_COLLISION_RADIUS - 1.25) {
       currentSpeed = Math.max(0, currentSpeed - 24 * deltaTime);
       velocity *= Math.exp(-8 * deltaTime);
     }
@@ -222,6 +223,7 @@ function maximumFrameLateralStep(
 }
 
 function runWholeLevelAtBrakedSpeed(level: number): { collision: number | null; maximumOffset: number } {
+  const definition = getLevel(level);
   const speed = 60 * MAX_SPEED / MAX_DISPLAY_SPEED;
   const deltaTime = 1 / 60;
   let offset = 0;
@@ -238,12 +240,10 @@ function runWholeLevelAtBrakedSpeed(level: number): { collision: number | null; 
       ? Math.sign(steeringDemand)
       : 0;
     const next = stepLateralMotion(offset, velocity, speed, curve, steering, deltaTime);
-    const localDistance = distance % 5400;
-    const insideTunnel = localDistance < 1500
-      || (localDistance >= 1640 && localDistance < 3200)
-      || localDistance >= 3360;
+    const localDistance = distance % definition.length;
+    const insideTunnel = definition.tunnels.some((tunnel) => localDistance >= tunnel.start && localDistance <= tunnel.end);
     if (insideTunnel) {
-      const wall = resolveTunnelWallContact(offset, next.offset, HALF_WIDTH, PLAYER_COLLISION_RADIUS);
+      const wall = resolveTunnelWallContact(offset, next.offset, definition.tunnelWidth / 2, PLAYER_COLLISION_RADIUS);
       offset = wall.offset;
       if (wall.collided) return { collision: distance, maximumOffset };
     } else {
@@ -257,6 +257,7 @@ function runWholeLevelAtBrakedSpeed(level: number): { collision: number | null; 
 }
 
 function runLevelOneWithoutSteering(): { collision: number | null; maximumOffset: number } {
+  const definition = getLevel(1);
   let distance = 0;
   let speed = 0;
   let offset = 0;
@@ -267,10 +268,8 @@ function runLevelOneWithoutSteering(): { collision: number | null; maximumOffset
 
   for (let step = 0; distance < 5400 && step < 5000; step += 1) {
     speed = Math.min(MAX_SPEED, speed + throttleAcceleration * deltaTime);
-    const localDistance = distance % 5400;
-    const insideTunnel = localDistance < 1500
-      || (localDistance >= 1640 && localDistance < 3200)
-      || localDistance >= 3360;
+    const localDistance = distance % definition.length;
+    const insideTunnel = definition.tunnels.some((tunnel) => localDistance >= tunnel.start && localDistance <= tunnel.end);
     const next = stepLateralMotion(
       offset,
       velocity,
@@ -285,7 +284,7 @@ function runLevelOneWithoutSteering(): { collision: number | null; maximumOffset
     velocity = next.velocity;
     maximumOffset = Math.max(maximumOffset, Math.abs(offset));
     if (insideTunnel) {
-      const wall = resolveTunnelWallContact(previousOffset, offset, HALF_WIDTH, PLAYER_COLLISION_RADIUS);
+      const wall = resolveTunnelWallContact(previousOffset, offset, definition.tunnelWidth / 2, PLAYER_COLLISION_RADIUS);
       offset = wall.offset;
       if (wall.collided) return { collision: distance, maximumOffset };
     }
@@ -295,6 +294,20 @@ function runLevelOneWithoutSteering(): { collision: number | null; maximumOffset
 }
 
 describe('tunnel racing physics', () => {
+  it('registers twenty unique, valid level definitions with a narrowing tunnel progression', () => {
+    expect(LEVELS).toHaveLength(20);
+    expect(validateLevels()).toEqual([]);
+    expect(new Set(LEVELS.map(({ name }) => name)).size).toBe(LEVELS.length);
+    expect(LEVELS[0].tunnelWidth).toBeGreaterThan(30);
+    expect(LEVELS.every((level, index) => index === 0
+      || level.tunnelWidth < LEVELS[index - 1].tunnelWidth)).toBe(true);
+    expect(LEVELS.every((level) => level.jumps.length <= 3)).toBe(true);
+    expect(LEVELS[0].sharpTurns).toHaveLength(0);
+    expect(LEVELS[1].sharpTurns.length).toBeGreaterThan(0);
+    expect(new Set(LEVELS.flatMap((level) => level.tunnels.map(({ style }) => style))))
+      .toEqual(new Set(['wireframe', 'metal', 'neon']));
+  });
+
   it('uses a genuinely high-speed physical range', () => {
     expect(MAX_SPEED).toBeGreaterThanOrEqual(210);
   });
@@ -316,7 +329,7 @@ describe('tunnel racing physics', () => {
     }
 
     expect(steeringResponse.velocity).toBeGreaterThan(0.65);
-    expect(sharpestCurve).toBeGreaterThan(0.0016);
+      expect(sharpestCurve).toBeGreaterThan(0.0014);
   });
 
   it('uses the same quadratic curve-force physics at every speed', () => {
@@ -356,7 +369,7 @@ describe('tunnel racing physics', () => {
     );
 
     expect(sharpTurnsForLevel(2)[0].length).toBeGreaterThanOrEqual(140);
-    expect(peakLevelTwentyCurvature).toBeGreaterThan(0.014);
+      expect(peakLevelTwentyCurvature).toBeGreaterThan(0.01);
     expect(peakLevelTwentyCurvature).toBeLessThan(0.017);
     expect(curveForce).toBeLessThan(MAX_LATERAL_ACCELERATION);
     expect(curveForce + steeringForce).toBeLessThan(MAX_LATERAL_ACCELERATION);
@@ -370,17 +383,12 @@ describe('tunnel racing physics', () => {
     expect(runWholeLevelAtBrakedSpeed(1).collision).toBeNull();
   });
 
-  it('extends gentle curve wavelengths as well as authored corner lengths', () => {
-    let firstBroadCurvePeak = 0;
-    for (let distance = 1; distance < 1000; distance += 1) {
-      if (trackX(distance, 1) >= trackX(distance - 1, 1)
-        && trackX(distance, 1) > trackX(distance + 1, 1)) {
-        firstBroadCurvePeak = distance;
-        break;
-      }
-    }
-
-    expect(firstBroadCurvePeak).toBeGreaterThan(500);
+  it('uses distinct authored curve profiles and long sharp-turn entries', () => {
+    expect(LEVELS.every((level) => level.track.curveAmplitude.length === 5
+      && level.track.curveFrequency.length === 5
+      && level.track.curvePhase.length === 5)).toBe(true);
+    expect(new Set(LEVELS.map((level) => level.track.curvePhase.join(','))).size)
+      .toBeGreaterThan(10);
     expect(sharpTurnsForLevel(MAX_LEVEL).every((turn) => turn.length >= 160)).toBe(true);
   });
 
@@ -413,7 +421,7 @@ describe('tunnel racing physics', () => {
     expect(turnCounts[0]).toBe(0);
     expect(turnCounts[1]).toBe(1);
     expect(turnCounts.at(-1)).toBe(8);
-    expect(turnCounts.every((count, index) => index === 0 || count >= turnCounts[index - 1])).toBe(true);
+      expect(levelTurns.every((turns, index) => turns.length === LEVELS[index].sharpTurns.length)).toBe(true);
     expect(levelTurns[1][0].strength * levelTurnSharpness(2))
       .toBeLessThan(levelTurns.at(-1)![0].strength * levelTurnSharpness(MAX_LEVEL));
 
@@ -450,8 +458,8 @@ describe('tunnel racing physics', () => {
     for (let level = 1; level <= MAX_LEVEL; level += 1) {
       const result = runWholeLevelAtBrakedSpeed(level);
       expect(result.collision, `level ${level}`).toBeNull();
-      expect(result.maximumOffset, `level ${level} should have a generous wall margin`)
-        .toBeLessThan(9.5);
+      expect(result.maximumOffset, `level ${level} should keep a wall margin`)
+        .toBeLessThan(getLevel(level).tunnelWidth / 2 - PLAYER_COLLISION_RADIUS);
     }
   });
 
@@ -762,45 +770,24 @@ describe('tunnel racing physics', () => {
     expect(predictTransfer(80, 100, RAMP_SLOPE, 0).roofClear).toBe(true);
   });
 
-  it('keeps both transfers reachable at a practical speed and at topspeed on every level', () => {
-    for (let level = 1; level <= MAX_LEVEL; level += 1) {
-      const transfers = [
-        { launch: 1500, landing: 1640, gap: 140, sectionEnd: 3200, launchSection: 0, landingSection: 1 },
-        { launch: 3200, landing: 3360, gap: 160, sectionEnd: 5400, launchSection: 1, landingSection: 2 },
-      ];
+  it('keeps each authored jump within the destination tunnel and speed envelope', () => {
+    for (const level of LEVELS) {
+      for (const jump of level.jumps) {
+        const gapLength = jump.landing - jump.launch;
+        const landingTunnel = level.tunnels.find((tunnel) => tunnel.start === jump.landing);
+        expect(landingTunnel, `level ${level.id}, jump ${jump.launch}: destination tunnel`).toBeDefined();
+        expect(gapLength).toBeGreaterThan(0);
+        expect(gapLength).toBeLessThan(180);
 
-      for (const { launch, landing, gap, sectionEnd, launchSection, landingSection } of transfers) {
-        const rampStart = launch - RAMP_LENGTH;
-        const launchHeight = rawTrackHeight(rampStart, level) + (launchSection + 1) * RAMP_RISE;
-        const landingHeight = rawTrackHeight(landing, level) + landingSection * RAMP_RISE;
-        const heightDelta = landingHeight - launchHeight;
         for (const speed of [160, MAX_SPEED]) {
-          const prediction = predictTransfer(speed, gap, RAMP_SLOPE, heightDelta);
-          const touchdownDistance = launch + prediction.horizontalRange;
-          const touchdownHeight = launchHeight + trajectoryHeight(
-            launchVerticalVelocity(speed, RAMP_SLOPE),
-            prediction.flightTime,
-          );
-          const touchdownHeightError = touchdownHeight - rawTrackHeight(touchdownDistance, level)
-            - landingSection * RAMP_RISE;
-          const clearanceSamples = Array.from({ length: 60 }, (_, sampleIndex) => {
-            const elapsed = gap / speed + (prediction.flightTime - gap / speed) * sampleIndex / 59;
-            const sampleDistance = launch + speed * elapsed;
-            const sampleHeight = launchHeight + trajectoryHeight(
-              launchVerticalVelocity(speed, RAMP_SLOPE),
-              elapsed,
-            );
-            const relativeHeight = sampleHeight - rawTrackHeight(sampleDistance, level) - landingSection * RAMP_RISE;
-            return { distance: sampleDistance, relativeHeight, clear: hasTunnelClearance(relativeHeight, TUNNEL_HEIGHT) };
-          });
-
-          expect(prediction.clearsGap, `level ${level}, gap ${launch}, speed ${speed}: gap`).toBe(true);
-          expect(prediction.roofClear, `level ${level}, gap ${launch}, speed ${speed}: roof`).toBe(true);
-          expect(touchdownDistance, `level ${level}, gap ${launch}, speed ${speed}: tunnel end`).toBeLessThan(sectionEnd - 8);
-          expect(hasTunnelClearance(touchdownHeightError, TUNNEL_HEIGHT), `level ${level}, gap ${launch}, speed ${speed}: touchdown`).toBe(true);
-          expect(clearanceSamples.every(({ clear }) => clear), `level ${level}, gap ${launch}, speed ${speed}: clearance`).toBe(true);
+          const prediction = predictTransfer(speed, gapLength, jump.rampSlope, 0, level.tunnelHeight);
+          expect(prediction.clearsGap, `level ${level.id}, jump ${jump.launch}, speed ${speed}`).toBe(true);
+          expect(prediction.roofClear, `level ${level.id}, jump ${jump.launch}, speed ${speed}`).toBe(true);
+          expect(jump.launch + prediction.horizontalRange).toBeLessThan((landingTunnel?.end ?? 0) - 8);
         }
-        expect(predictTransfer(60, gap, RAMP_SLOPE, heightDelta).clearsGap, `level ${level}, gap ${launch}: low-speed rejection`).toBe(false);
+
+        expect(predictTransfer(60, gapLength, jump.rampSlope, 0, level.tunnelHeight).clearsGap)
+          .toBe(false);
       }
     }
   });

@@ -3,6 +3,7 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import './style.css';
+import { getLevel, LEVELS, type TunnelStyle } from './levels';
 import {
   cameraOrientationForSteering,
   cameraQuaternionFollowingTrack,
@@ -10,8 +11,6 @@ import {
 } from './camera-rig';
 import {
   GRAVITY,
-  HALF_HEIGHT,
-  HALF_WIDTH,
   LANDING_MARGIN,
   MAX_DISPLAY_SPEED,
   MAX_LEVEL,
@@ -19,9 +18,7 @@ import {
   BRAKING_DECELERATION,
   PLAYER_COLLISION_RADIUS,
   RAMP_LENGTH,
-  RAMP_RISE,
   RAMP_SLOPE,
-  TUNNEL_HEIGHT,
   curveAtDistance,
   applyTunnelWallRebound,
   flightDuration,
@@ -29,7 +26,6 @@ import {
   isLevelBoundary,
   isUpwardLaunch,
   levelAtDistance,
-  landingTunnelIndexForGap,
   launchVerticalVelocity,
   predictTransfer,
   rawTrackHeight,
@@ -51,11 +47,20 @@ type SignalState = 'red' | 'amber' | 'green' | 'air';
 interface TunnelSection {
   start: number;
   end: number;
+  levelId: number;
+  width: number;
+  height: number;
+  style: TunnelStyle;
 }
 
 interface JumpGap {
   launch: number;
   landing: number;
+  landingTunnelEnd: number;
+  levelId: number;
+  tunnelWidth: number;
+  tunnelHeight: number;
+  rampSlope: number;
 }
 
 interface TrackFrame {
@@ -70,25 +75,30 @@ const CRASH_DURATION = 1.25;
 const SPEED_SCALE = MAX_SPEED / 120;
 let currentLevel = 1;
 
-const LEVEL_LENGTH = 5400;
-const TUNNEL_LAYOUT: TunnelSection[] = [
-  { start: 0, end: 1500 },
-  { start: 1640, end: 3200 },
-  { start: 3360, end: 5400 },
-];
-const TUNNELS: TunnelSection[] = Array.from({ length: MAX_LEVEL }, (_, levelIndex) =>
-  TUNNEL_LAYOUT.map((section) => ({
-    start: section.start + levelIndex * LEVEL_LENGTH,
-    end: section.end + levelIndex * LEVEL_LENGTH,
+const LEVEL_LENGTH = LEVELS[0].length;
+const LEVEL_STARTS = LEVELS.map((_, index) => index * LEVEL_LENGTH);
+const TUNNELS: TunnelSection[] = LEVELS.flatMap((level, levelIndex) =>
+  level.tunnels.map((section) => ({
+    start: section.start + LEVEL_STARTS[levelIndex],
+    end: section.end + LEVEL_STARTS[levelIndex],
+    levelId: level.id,
+    width: level.tunnelWidth,
+    height: level.tunnelHeight,
+    style: section.style,
   })),
-).flat();
-const GAPS: JumpGap[] = Array.from({ length: MAX_LEVEL }, (_, levelIndex) =>
-  TUNNEL_LAYOUT.slice(0, -1).map((section, index) => ({
-    launch: section.end + levelIndex * LEVEL_LENGTH,
-    landing: TUNNEL_LAYOUT[index + 1].start + levelIndex * LEVEL_LENGTH,
-  })),
-).flat();
-const LEVEL_ENDS = Array.from({ length: MAX_LEVEL }, (_, index) => (index + 1) * LEVEL_LENGTH);
+);
+const tunnelAtDistance = (distance: number) => TUNNELS.find((section) => distance >= section.start && distance <= section.end);
+const GAPS: JumpGap[] = LEVELS.flatMap((level, levelIndex) => level.jumps.map((jump) => ({
+  launch: jump.launch + LEVEL_STARTS[levelIndex],
+  landing: jump.landing + LEVEL_STARTS[levelIndex],
+  landingTunnelEnd: (level.tunnels.find((section) => section.start === jump.landing)?.end ?? jump.landing)
+    + LEVEL_STARTS[levelIndex],
+  levelId: level.id,
+  tunnelWidth: level.tunnelWidth,
+  tunnelHeight: level.tunnelHeight,
+  rampSlope: jump.rampSlope,
+})));
+const LEVEL_ENDS = LEVELS.map((level, index) => LEVEL_STARTS[index] + level.length);
 const LEVEL_TRANSITION_LENGTH = 120;
 const STARTING_CAMERA_CLEARANCE = 12;
 const TUNNEL_RING_SPACING = 24;
@@ -158,32 +168,36 @@ const trackRoot = new THREE.Group();
 scene.add(trackRoot);
 
 function localTrackHeight(distance: number, level: number): number {
-  const sectionIndex = TUNNEL_LAYOUT.findIndex((section) => distance >= section.start && distance <= section.end);
+  const definition = getLevel(level);
+  const sectionIndex = definition.tunnels.findIndex((section) => distance >= section.start && distance <= section.end);
   if (sectionIndex >= 0) {
-    const section = TUNNEL_LAYOUT[sectionIndex];
+    const section = definition.tunnels[sectionIndex];
     const rampStart = section.end - RAMP_LENGTH;
-    if (sectionIndex < TUNNEL_LAYOUT.length - 1 && distance >= rampStart) {
+    const jump = definition.jumps.find((candidate) => candidate.launch === section.end);
+    if (jump && distance >= rampStart) {
       const progress = (distance - rampStart) / RAMP_LENGTH;
       return rawTrackHeight(rampStart, level)
-        + sectionIndex * RAMP_RISE
-        + rampHeightAtProgress(progress);
+        + definition.jumps.slice(0, sectionIndex).reduce((total, item) => total + RAMP_LENGTH * item.rampSlope / 2, 0)
+        + rampHeightAtProgress(progress) * (jump.rampSlope / RAMP_SLOPE);
     }
-    return rawTrackHeight(distance, level) + sectionIndex * RAMP_RISE;
+    return rawTrackHeight(distance, level)
+      + definition.jumps.slice(0, sectionIndex).reduce((total, item) => total + RAMP_LENGTH * item.rampSlope / 2, 0);
   }
 
-  const nextSectionIndex = TUNNEL_LAYOUT.findIndex((section) => distance < section.start);
+  const nextSectionIndex = definition.tunnels.findIndex((section) => distance < section.start);
   if (nextSectionIndex > 0) {
-    const previousSection = TUNNEL_LAYOUT[nextSectionIndex - 1];
-    const nextSection = TUNNEL_LAYOUT[nextSectionIndex];
+    const previousSection = definition.tunnels[nextSectionIndex - 1];
+    const nextSection = definition.tunnels[nextSectionIndex];
     const progress = (distance - previousSection.end) / (nextSection.start - previousSection.end);
     const launchHeight = rawTrackHeight(previousSection.end - RAMP_LENGTH, level)
-      + nextSectionIndex * RAMP_RISE;
-    const landingHeight = rawTrackHeight(nextSection.start, level) + nextSectionIndex * RAMP_RISE;
+      + definition.jumps.slice(0, nextSectionIndex).reduce((total, item) => total + RAMP_LENGTH * item.rampSlope / 2, 0);
+    const landingHeight = rawTrackHeight(nextSection.start, level)
+      + definition.jumps.slice(0, nextSectionIndex).reduce((total, item) => total + RAMP_LENGTH * item.rampSlope / 2, 0);
     return THREE.MathUtils.lerp(launchHeight, landingHeight, progress);
   }
 
-  const finalSectionIndex = TUNNEL_LAYOUT.length - 1;
-  return rawTrackHeight(distance, level) + finalSectionIndex * RAMP_RISE;
+  return rawTrackHeight(distance, level)
+    + definition.jumps.reduce((total, jump) => total + RAMP_LENGTH * jump.rampSlope / 2, 0);
 }
 
 function courseLevel(distance: number): number {
@@ -239,10 +253,7 @@ function trackOffsetX(distance: number, level: number): number {
 }
 
 function launchRampSlope(distance: number): number {
-  const localDistance = distance - (courseLevel(distance) - 1) * LEVEL_LENGTH;
-  const sectionIndex = TUNNEL_LAYOUT.findIndex((section) => Math.abs(section.end - localDistance) < 0.01);
-  if (sectionIndex < 0 || sectionIndex >= TUNNEL_LAYOUT.length - 1) return 0;
-  return RAMP_SLOPE;
+  return GAPS.find((gap) => Math.abs(gap.launch - distance) < 0.01)?.rampSlope ?? 0;
 }
 
 function courseCurve(distance: number): number {
@@ -272,8 +283,10 @@ function sampleTrack(distance: number): TrackFrame {
 
 function cornersAt(distance: number): THREE.Vector3[] {
   const { center, right, up } = sampleTrack(distance);
-  const halfWidth = HALF_WIDTH;
-  const halfHeight = HALF_HEIGHT;
+  const section = tunnelAtDistance(distance);
+  const level = getLevel(courseLevel(distance));
+  const halfWidth = (section?.width ?? level.tunnelWidth) / 2;
+  const halfHeight = (section?.height ?? level.tunnelHeight) / 2;
   return [
     center.clone().addScaledVector(right, -halfWidth).addScaledVector(up, -halfHeight),
     center.clone().addScaledVector(right, halfWidth).addScaledVector(up, -halfHeight),
@@ -543,7 +556,7 @@ function addNeonSideTubes(section: TunnelSection): void {
     const frame = sampleTrack(distance);
     placements[colorIndex].push({
       position: frame.center.clone()
-        .addScaledVector(frame.right, side * (HALF_WIDTH - 0.075))
+        .addScaledVector(frame.right, side * (section.width / 2 - 0.075))
         .addScaledVector(frame.up, height),
       orientation: new THREE.Quaternion().setFromUnitVectors(cylinderAxis, frame.tangent),
       length,
@@ -583,12 +596,12 @@ function addNeonSideTubes(section: TunnelSection): void {
   });
 }
 
-function addTunnel(section: TunnelSection, index: number): void {
-  if (index === 1) {
+function addTunnel(section: TunnelSection): void {
+  if (section.style === 'metal') {
     addMetalSideWalls(section);
     addMetalRoofAndRoad(section);
   }
-  if (index === 2) addNeonSideTubes(section);
+  if (section.style === 'neon') addNeonSideTubes(section);
 
   const railPoints: THREE.Vector3[] = [];
   const ringPoints: THREE.Vector3[] = [];
@@ -618,10 +631,10 @@ function addTunnel(section: TunnelSection, index: number): void {
     }
   }
 
-  const railColor = index === 1 ? 0x70f5ef : index === 2 ? 0xb48aff : 0x48dce8;
-  const ringColor = index === 2 ? 0xa983ed : 0x88e9ef;
+  const railColor = section.style === 'metal' ? 0x70f5ef : section.style === 'neon' ? 0xb48aff : 0x48dce8;
+  const ringColor = section.style === 'neon' ? 0xa983ed : 0x88e9ef;
   addWireframeSegments(railPoints, railColor, 0.92);
-  addWireframeSegments(ringPoints, ringColor, index === 2 ? 0.62 : 0.54);
+  addWireframeSegments(ringPoints, ringColor, section.style === 'neon' ? 0.62 : 0.54);
 }
 
 function addGate(distance: number, color: number, opacity = 0.95): void {
@@ -647,7 +660,7 @@ function addSharpTurnSigns(): void {
       for (const signOffset of SHARP_TURN_WARNING_OFFSETS) {
         const signDistance = turn.center + signOffset + levelIndex * LEVEL_LENGTH;
         const frame = sampleTrack(signDistance);
-        const roadside = -turn.direction * (HALF_WIDTH - 4.8);
+        const roadside = -turn.direction * (getLevel(level).tunnelWidth / 2 - 4.8);
         const panelCenter = frame.center.clone()
           .addScaledVector(frame.right, roadside)
           .addScaledVector(frame.up, panelHeight);
@@ -700,7 +713,7 @@ function addSharpTurnSigns(): void {
 }
 
 function buildCourse(): void {
-  TUNNELS.forEach((section, index) => addTunnel(section, index % TUNNEL_LAYOUT.length));
+  TUNNELS.forEach(addTunnel);
   LEVEL_ENDS.forEach((end) => addGate(end, 0xffffff, 1));
   addSharpTurnSigns();
 }
@@ -983,11 +996,12 @@ function advanceLevel(): void {
 
 function resetRun(startLevel = 1, startSpeed = 0, startLocalDistance = 0): void {
   currentLevel = THREE.MathUtils.clamp(Math.floor(startLevel), 1, MAX_LEVEL);
-  const localDistance = TUNNEL_LAYOUT
+  const definition = getLevel(currentLevel);
+  const localDistance = definition.tunnels
     .map((section) => THREE.MathUtils.clamp(startLocalDistance, section.start, section.end))
     .sort((left, right) => Math.abs(left - startLocalDistance) - Math.abs(right - startLocalDistance))[0];
   const spawnDistance = localDistance === 0 ? STARTING_CAMERA_CLEARANCE : localDistance;
-  distance = (currentLevel - 1) * LEVEL_LENGTH + spawnDistance;
+  distance = LEVEL_STARTS[currentLevel - 1] + spawnDistance;
   runDistanceOrigin = localDistance === 0 ? distance : 0;
   speed = THREE.MathUtils.clamp(startSpeed, 0, MAX_SPEED);
   lateralOffset = 0;
@@ -996,8 +1010,9 @@ function resetRun(startLevel = 1, startSpeed = 0, startLocalDistance = 0): void 
   cameraSteeringInput = 0;
   airborne = false;
   airElapsed = 0;
-  activeGapIndex = (currentLevel - 1) * (TUNNEL_LAYOUT.length - 1)
-    + TUNNEL_LAYOUT.slice(0, -1).filter((section) => section.end < localDistance).length;
+  activeGapIndex = GAPS.findIndex((gap) => gap.levelId === currentLevel && gap.launch >= distance);
+  if (activeGapIndex < 0) activeGapIndex = GAPS.findIndex((gap) => gap.levelId > currentLevel);
+  if (activeGapIndex < 0) activeGapIndex = GAPS.length;
   checkpointDistance = distance;
   checkpointSpeed = speed;
   crashTime = 0;
@@ -1116,7 +1131,7 @@ function beginJump(gap: JumpGap, rampSlope: number): void {
 
 function playTunnelLineSwoosh(previousDistance: number, currentDistance: number): void {
   if (!speedAudio || airborne || currentDistance <= previousDistance) return;
-  const section = TUNNELS.find(({ start, end }) => currentDistance >= start && currentDistance <= end);
+  const section = tunnelAtDistance(currentDistance);
   if (!section) return;
 
   const nextRegularLine = previousDistance < section.start
@@ -1125,7 +1140,7 @@ function playTunnelLineSwoosh(previousDistance: number, currentDistance: number)
       + (Math.floor((previousDistance - section.start) / TUNNEL_RING_SPACING) + 1) * TUNNEL_RING_SPACING;
   const nextLine = Math.min(nextRegularLine, section.end);
   if (nextLine <= currentDistance) {
-    const wallDistance = HALF_WIDTH - PLAYER_COLLISION_RADIUS - Math.abs(lateralOffset);
+    const wallDistance = section.width / 2 - PLAYER_COLLISION_RADIUS - Math.abs(lateralOffset);
     const proximity = THREE.MathUtils.clamp((5.5 - wallDistance) / 5.5, 0, 1);
     speedAudio.playTunnelSwoosh(
       speed / MAX_SPEED,
@@ -1139,11 +1154,11 @@ function completeJump(gap: JumpGap): void {
   const landingDistance = airLaunchDistance + airLaunchSpeed * airFlightTime;
   const landingCenterY = pathCenter(landingDistance).y;
   const verticalError = currentAirHeight() - landingCenterY;
-  const landingTunnelIndex = landingTunnelIndexForGap(activeGapIndex, TUNNEL_LAYOUT.length);
+  const landingTunnel = TUNNELS.find((section) => section.levelId === gap.levelId && section.start === gap.landing);
   const withinTunnel = landingDistance >= gap.landing
-    && landingDistance <= TUNNELS[landingTunnelIndex].end - 8;
-  const withinHorizontalZone = Math.abs(lateralOffset) <= HALF_WIDTH - LANDING_MARGIN;
-  const withinVerticalZone = hasTunnelClearance(verticalError, TUNNEL_HEIGHT);
+    && landingDistance <= (landingTunnel?.end ?? gap.landing) - 8;
+  const withinHorizontalZone = Math.abs(lateralOffset) <= gap.tunnelWidth / 2 - LANDING_MARGIN;
+  const withinVerticalZone = hasTunnelClearance(verticalError, gap.tunnelHeight);
 
   if (!withinTunnel || !withinVerticalZone) {
     const reason = !withinTunnel
@@ -1163,8 +1178,8 @@ function completeJump(gap: JumpGap): void {
     const contactSide = Math.sign(lateralOffset) || 1;
     const wallContact = resolveTunnelWallContact(
       lateralOffset,
-      contactSide * HALF_WIDTH,
-      HALF_WIDTH,
+      contactSide * gap.tunnelWidth / 2,
+      gap.tunnelWidth / 2,
       PLAYER_COLLISION_RADIUS,
     );
     const rebound = applyTunnelWallRebound(wallContact, lateralVelocity, speed);
@@ -1223,12 +1238,13 @@ function updateDriving(deltaTime: number): void {
   lateralOffset = lateralState.offset;
   lateralVelocity = lateralState.velocity;
 
-  const insideTunnel = TUNNELS.some((section) => distance >= section.start && distance <= section.end);
-  if (insideTunnel) {
+  const currentTunnel = tunnelAtDistance(distance);
+  if (currentTunnel) {
+    const tunnelHalfWidth = currentTunnel.width / 2;
     const wallContact = resolveTunnelWallContact(
       previousLateralOffset,
       lateralOffset,
-      HALF_WIDTH,
+      tunnelHalfWidth,
       PLAYER_COLLISION_RADIUS,
     );
     if (wallContact.collided) {
@@ -1240,7 +1256,7 @@ function updateDriving(deltaTime: number): void {
       runState.textContent = 'WALL REBOUND · SPEED LOST';
     } else {
       lateralOffset = wallContact.offset;
-      const softWallEdge = HALF_WIDTH - PLAYER_COLLISION_RADIUS - 1.25;
+      const softWallEdge = tunnelHalfWidth - PLAYER_COLLISION_RADIUS - 1.25;
       if (wallReboundTime <= 0 && Math.abs(lateralOffset) > softWallEdge) {
         if (!airborne) speed = Math.max(0, speed - 24 * deltaTime);
         lateralVelocity *= Math.exp(-8 * deltaTime);
@@ -1253,7 +1269,7 @@ function updateDriving(deltaTime: number): void {
     distance = airLaunchDistance + airLaunchSpeed * airElapsed;
     if (activeGapIndex < GAPS.length && distance >= GAPS[activeGapIndex].landing) {
       const verticalOffset = currentAirHeight() - pathCenter(distance).y;
-      if (!hasTunnelClearance(verticalOffset, TUNNEL_HEIGHT)) {
+      if (!hasTunnelClearance(verticalOffset, GAPS[activeGapIndex].tunnelHeight)) {
         crash(verticalOffset > 0 ? 'ROOF IMPACT' : 'FLOOR IMPACT');
         return;
       }
@@ -1292,7 +1308,7 @@ function minimumSafeSpeed(gap: JumpGap, rampSlope: number): number {
   let high = MAX_SPEED;
   for (let iteration = 0; iteration < 22; iteration += 1) {
     const candidate = (low + high) / 2;
-    const prediction = predictTransfer(candidate, gapDistance, rampSlope, heightDelta, TUNNEL_HEIGHT);
+    const prediction = predictTransfer(candidate, gapDistance, rampSlope, heightDelta, gap.tunnelHeight);
     if (prediction.clearsGap && prediction.roofClear) high = candidate;
     else low = candidate;
   }
@@ -1338,10 +1354,10 @@ function updateHud(): void {
   const gapLength = Math.max(0, gap.landing - gap.launch);
   const rampSlope = launchRampSlope(gap.launch);
   const targetHeightDelta = pathCenter(gap.landing).y - pathCenter(gap.launch).y;
-  const prediction = predictTransfer(speed, gapLength, rampSlope, targetHeightDelta, TUNNEL_HEIGHT);
+  const prediction = predictTransfer(speed, gapLength, rampSlope, targetHeightDelta, gap.tunnelHeight);
   const neededSpeed = minimumSafeSpeed(gap, rampSlope);
   const distanceToGap = Math.max(0, gap.launch - distance);
-  const horizontalMargin = HALF_WIDTH - LANDING_MARGIN - Math.abs(lateralOffset);
+  const horizontalMargin = gap.tunnelWidth / 2 - LANDING_MARGIN - Math.abs(lateralOffset);
   const signal: SignalState = prediction.clearsGap && prediction.roofClear && horizontalMargin >= 1
     ? 'green'
     : speed >= neededSpeed * 0.92 && prediction.roofClear && horizontalMargin > 0
@@ -1446,9 +1462,10 @@ function animate(time: number): void {
   updateDriving(deltaTime);
   updateCamera(deltaTime || 1 / 60);
   renderer.render(scene, camera);
-  const wallDistance = HALF_WIDTH - PLAYER_COLLISION_RADIUS - Math.abs(lateralOffset);
+  const tunnelWidth = tunnelAtDistance(distance)?.width ?? getLevel(currentLevel).tunnelWidth;
+  const wallDistance = tunnelWidth / 2 - PLAYER_COLLISION_RADIUS - Math.abs(lateralOffset);
   const wallProximity = THREE.MathUtils.clamp((5.5 - wallDistance) / 5.5, 0, 1);
-  const insideTunnel = !airborne && TUNNELS.some((section) => distance >= section.start && distance <= section.end);
+  const insideTunnel = !airborne && Boolean(tunnelAtDistance(distance));
   const throttleHeld = pressedKeys.has('arrowup') || pressedKeys.has('w');
   const brakeHeld = pressedKeys.has('arrowdown') || pressedKeys.has('s');
   const engineLoad = gameState !== 'playing' ? 0 : throttleHeld ? 1 : brakeHeld ? 0.42 : 0.18;
