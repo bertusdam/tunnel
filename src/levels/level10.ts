@@ -2,7 +2,7 @@ import type { LevelDefinition } from './types';
 
 const level: LevelDefinition = {
   id: 10, name: 'Blue Comet', length: 5400, tunnelWidth: 25.7, tunnelHeight: 16,
-  tunnels: [{ id: 'comet-mouth', start: 0, end: 1980, style: 'neon' }, { id: 'comet-tail', start: 2130, end: 5400, style: 'wireframe' }],
+  tunnels: [{ id: 'comet-mouth', start: 0, end: 1980, style: 'neon' }, { id: 'comet-tail', start: 2130, end: 5400, style: 'graffiti' }],
   jumps: [{ launch: 1980, landing: 2130, rampSlope: 0.127 }],
   sharpTurns: [{ center: 910, length: 210, direction: -1, strength: 6.1 }, { center: 3030, length: 182, direction: 1, strength: 5.6 }, { center: 3620, length: 224, direction: -1, strength: 6.3 }, { center: 4870, length: 192, direction: 1, strength: 5.9 }, { center: 5260, length: 168, direction: -1, strength: 5.4 }],
   track: {

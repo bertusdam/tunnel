@@ -1,4 +1,4 @@
-export type TunnelStyle = 'wireframe' | 'metal' | 'neon';
+export type TunnelStyle = 'wireframe' | 'metal' | 'neon' | 'graffiti';
 
 export interface TunnelDefinition {
   id: string;

@@ -2,7 +2,7 @@ import type { LevelDefinition } from './types';
 
 const level: LevelDefinition = {
   id: 4, name: 'The Long Swerve', length: 5400, tunnelWidth: 29.9, tunnelHeight: 16,
-  tunnels: [{ id: 'swerve-entry', start: 0, end: 2190, style: 'wireframe' }, { id: 'swerve-arrival', start: 2338, end: 5400, style: 'neon' }],
+  tunnels: [{ id: 'swerve-entry', start: 0, end: 2190, style: 'wireframe' }, { id: 'swerve-arrival', start: 2338, end: 5400, style: 'graffiti' }],
   jumps: [{ launch: 2190, landing: 2338, rampSlope: 0.124 }],
   sharpTurns: [{ center: 3910, length: 204, direction: -1, strength: 5.9 }],
   track: {

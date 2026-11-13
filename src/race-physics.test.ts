@@ -305,7 +305,7 @@ describe('tunnel racing physics', () => {
     expect(LEVELS[0].sharpTurns).toHaveLength(0);
     expect(LEVELS[1].sharpTurns.length).toBeGreaterThan(0);
     expect(new Set(LEVELS.flatMap((level) => level.tunnels.map(({ style }) => style))))
-      .toEqual(new Set(['wireframe', 'metal', 'neon']));
+      .toEqual(new Set(['wireframe', 'metal', 'neon', 'graffiti']));
   });
 
   it('uses a genuinely high-speed physical range', () => {

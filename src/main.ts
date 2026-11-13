@@ -502,6 +502,16 @@ interface NeonTubePlacement {
   length: number;
 }
 
+interface FlickeringLamp {
+  tube: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>;
+  halo: THREE.Mesh<THREE.CylinderGeometry, THREE.MeshBasicMaterial>;
+  color: THREE.Color;
+  phase: number;
+  flickers: boolean;
+}
+
+const flickeringLamps: FlickeringLamp[] = [];
+
 function neonTubeGeometry(radius: number): THREE.BufferGeometry {
   const vertices: number[] = [];
   const segments = 8;
@@ -596,12 +606,207 @@ function addNeonSideTubes(section: TunnelSection): void {
   });
 }
 
+function addGraffitiTunnel(section: TunnelSection): void {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const spillPositions: number[] = [];
+  const spillColors: number[] = [];
+  const graffitiPoints: THREE.Vector3[] = [];
+  const graffitiColor = 0x080808;
+  const wallTints = [0x414044, 0x504d50, 0x46464a, 0x575255];
+  const roofTints = [0x1b1d22, 0x222328, 0x191c21];
+  const floorTints = [0x252629, 0x2d2c2d, 0x232528];
+  const panelLength = 18;
+
+  const addTriangle = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, tint: number) => {
+    const color = new THREE.Color(tint);
+    for (const point of [a, b, c]) {
+      positions.push(point.x, point.y, point.z);
+      colors.push(color.r, color.g, color.b);
+    }
+  };
+  const addQuad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, tint: number) => {
+    addTriangle(a, b, c, tint);
+    addTriangle(a, c, d, tint);
+  };
+
+  for (let distance = section.start, panelIndex = 0;
+    distance < section.end;
+    distance += panelLength, panelIndex += 1) {
+    const nextDistance = Math.min(distance + panelLength, section.end);
+    const current = cornersAt(distance);
+    const next = cornersAt(nextDistance);
+    const wallTint = wallTints[panelIndex % wallTints.length];
+    addQuad(current[0], current[3], next[3], next[0], wallTint);
+    addQuad(current[1], next[1], next[2], current[2], wallTints[(panelIndex + 1) % wallTints.length]);
+    addQuad(current[3], current[2], next[2], next[3], roofTints[panelIndex % roofTints.length]);
+    addQuad(current[0], next[0], next[1], current[1], floorTints[panelIndex % floorTints.length]);
+  }
+
+  const shell = new THREE.BufferGeometry();
+  shell.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  shell.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  trackRoot.add(new THREE.Mesh(shell, new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    side: THREE.DoubleSide,
+  })));
+
+  const graffitiShapes = [
+    [[-3, -1], [-2.4, 1.7], [-1.6, -0.5], [-0.8, 1.6], [0, -1]],
+    [[0.35, -1], [0.35, 1.7], [2, 1.7], [2.35, 1.1], [0.8, 0.25], [2.25, -0.35], [1.9, -1], [0.35, -1]],
+    [[-2.5, -0.8], [-1.2, 1.4], [0, -0.7], [1.25, 1.5], [2.5, -0.8]],
+  ];
+  let seed = (section.start + 17) * 104729 % 2147483647;
+  const random = () => {
+    seed = (seed * 48271) % 2147483647;
+    return seed / 2147483647;
+  };
+  const graffitiPoint = (distance: number, along: number, vertical: number, side: number) => {
+    const frame = sampleTrack(distance + along);
+    return frame.center
+      .addScaledVector(frame.right, side * (section.width / 2 - 0.09))
+      .addScaledVector(frame.up, vertical);
+  };
+  const drawTag = (distance: number, side: number, tagIndex: number) => {
+    const shape = graffitiShapes[tagIndex % graffitiShapes.length];
+    const verticalCenter = -0.2 + random() * 2.2;
+    const scale = 0.82 + random() * 0.35;
+    for (let pointIndex = 0; pointIndex < shape.length - 1; pointIndex += 1) {
+      const [alongA, heightA] = shape[pointIndex];
+      const [alongB, heightB] = shape[pointIndex + 1];
+      graffitiPoints.push(
+        graffitiPoint(distance, alongA * scale, verticalCenter + heightA * scale, side),
+        graffitiPoint(distance, alongB * scale, verticalCenter + heightB * scale, side),
+      );
+    }
+    // A couple of short drips make the marks read as spray-painted tags, not tunnel wiring.
+    for (let drip = 0; drip < 2; drip += 1) {
+      const along = -1.8 + random() * 3.6;
+      const top = verticalCenter - 0.35 + random() * 1.1;
+      graffitiPoints.push(
+        graffitiPoint(distance, along, top, side),
+        graffitiPoint(distance, along + 0.1, top - 0.55 - random() * 0.55, side),
+      );
+    }
+  };
+
+  let tagIndex = 0;
+  for (let distance = section.start + 38; distance < section.end - 18; distance += 92) {
+    const side = tagIndex % 2 === 0 ? -1 : 1;
+    drawTag(distance, side, tagIndex);
+    if (tagIndex % 3 === 1) drawTag(distance + 18, -side, tagIndex + 2);
+    tagIndex += 1;
+  }
+  if (graffitiPoints.length > 0) addWireframeSegments(graffitiPoints, graffitiColor, 0.96);
+
+  const fixtureGeometry = new THREE.BoxGeometry(8.2, 0.4, 0.42);
+  const fixtureMaterial = new THREE.MeshBasicMaterial({ color: 0x353639 });
+  const tubeGeometry = new THREE.CylinderGeometry(0.13, 0.13, 7.6, 12);
+  const haloGeometry = new THREE.CylinderGeometry(0.5, 0.5, 8.5, 12, 1, true);
+  const tubeAxis = new THREE.Vector3(0, 1, 0);
+  const fixtureAxis = new THREE.Vector3(1, 0, 0);
+  let lampIndex = 0;
+  for (let distance = section.start + 46; distance < section.end - 22; distance += 72) {
+    const frame = sampleTrack(distance);
+    for (const side of [-1, 1]) {
+      const position = frame.center.clone()
+        .addScaledVector(frame.right, side * (section.width / 2 - 0.72))
+        .addScaledVector(frame.up, section.height / 2 - 0.62);
+      const fixture = new THREE.Mesh(fixtureGeometry, fixtureMaterial);
+      fixture.position.copy(position);
+      fixture.quaternion.setFromUnitVectors(fixtureAxis, frame.tangent);
+      trackRoot.add(fixture);
+
+      const color = new THREE.Color(0xe7f4ff);
+      const tubeMaterial = new THREE.MeshBasicMaterial({ color, toneMapped: false });
+      const haloMaterial = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.2,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      });
+      const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+      tube.position.copy(position);
+      tube.quaternion.setFromUnitVectors(tubeAxis, frame.tangent);
+      const halo = new THREE.Mesh(haloGeometry, haloMaterial);
+      halo.position.copy(position);
+      halo.quaternion.copy(tube.quaternion);
+      trackRoot.add(halo, tube);
+      flickeringLamps.push({
+        tube,
+        halo,
+        color,
+        phase: lampIndex * 1.71,
+        flickers: lampIndex % 9 === 4,
+      });
+
+      // Faint wall wash under each fixture, leaving a clear dark interval before the next pair.
+      const before = sampleTrack(distance - 18);
+      const center = sampleTrack(distance);
+      const after = sampleTrack(distance + 18);
+      const topBefore = before.center.clone()
+        .addScaledVector(before.right, side * (section.width / 2 - 0.16))
+        .addScaledVector(before.up, section.height / 2 - 0.45);
+      const topCenter = center.center.clone()
+        .addScaledVector(center.right, side * (section.width / 2 - 0.16))
+        .addScaledVector(center.up, section.height / 2 - 0.45);
+      const topAfter = after.center.clone()
+        .addScaledVector(after.right, side * (section.width / 2 - 0.16))
+        .addScaledVector(after.up, section.height / 2 - 0.45);
+      const lowerBefore = topBefore.clone().addScaledVector(before.up, -5.2);
+      const lowerCenter = topCenter.clone().addScaledVector(center.up, -5.2);
+      const lowerAfter = topAfter.clone().addScaledVector(after.up, -5.2);
+      const washColor = color.clone().multiplyScalar(0.12);
+      const washVertices = [
+        [topBefore, 0.015], [topCenter, 0.6], [lowerCenter, 0.04],
+        [topBefore, 0.015], [lowerCenter, 0.04], [lowerBefore, 0.005],
+        [topCenter, 0.6], [topAfter, 0.015], [lowerAfter, 0.005],
+        [topCenter, 0.6], [lowerAfter, 0.005], [lowerCenter, 0.04],
+      ] as const;
+      for (const [point, intensity] of washVertices) {
+        spillPositions.push(point.x, point.y, point.z);
+        spillColors.push(washColor.r * intensity, washColor.g * intensity, washColor.b * intensity);
+      }
+      lampIndex += 1;
+    }
+  }
+  const spill = new THREE.BufferGeometry();
+  spill.setAttribute('position', new THREE.Float32BufferAttribute(spillPositions, 3));
+  spill.setAttribute('color', new THREE.Float32BufferAttribute(spillColors, 3));
+  trackRoot.add(new THREE.Mesh(spill, new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.3,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  })));
+}
+
+function updateFlickeringLamps(time: number): void {
+  for (const lamp of flickeringLamps) {
+    if (!lamp.flickers) continue;
+    const phase = time * 0.006 + lamp.phase;
+    const flickerTick = Math.floor(time / 55);
+    const irregularFlicker = Math.sin(flickerTick * 12.9898 + lamp.phase * 78.233) > 0.91;
+    const dropout = Math.sin(time * 0.0015 + lamp.phase) > 0.94;
+    const brightness = dropout ? 0.02 : irregularFlicker ? 0.18 : 0.88 + 0.12 * Math.sin(phase * 2.1) ** 2;
+    lamp.tube.material.color.copy(lamp.color).multiplyScalar(brightness);
+    lamp.halo.material.opacity = brightness < 0.2 ? 0.025 : 0.2;
+  }
+}
+
 function addTunnel(section: TunnelSection): void {
   if (section.style === 'metal') {
     addMetalSideWalls(section);
     addMetalRoofAndRoad(section);
   }
   if (section.style === 'neon') addNeonSideTubes(section);
+  if (section.style === 'graffiti') addGraffitiTunnel(section);
 
   const railPoints: THREE.Vector3[] = [];
   const ringPoints: THREE.Vector3[] = [];
@@ -631,10 +836,13 @@ function addTunnel(section: TunnelSection): void {
     }
   }
 
-  const railColor = section.style === 'metal' ? 0x70f5ef : section.style === 'neon' ? 0xb48aff : 0x48dce8;
-  const ringColor = section.style === 'neon' ? 0xa983ed : 0x88e9ef;
-  addWireframeSegments(railPoints, railColor, 0.92);
-  addWireframeSegments(ringPoints, ringColor, section.style === 'neon' ? 0.62 : 0.54);
+  const railColor = section.style === 'metal' ? 0x70f5ef
+    : section.style === 'neon' ? 0xb48aff
+      : section.style === 'graffiti' ? 0x555057 : 0x48dce8;
+  const ringColor = section.style === 'neon' ? 0xa983ed
+    : section.style === 'graffiti' ? 0x403b43 : 0x88e9ef;
+  addWireframeSegments(railPoints, railColor, section.style === 'graffiti' ? 0.2 : 0.92);
+  addWireframeSegments(ringPoints, ringColor, section.style === 'neon' ? 0.62 : section.style === 'graffiti' ? 0.17 : 0.54);
 }
 
 function addGate(distance: number, color: number, opacity = 0.95): void {
@@ -1461,6 +1669,7 @@ function animate(time: number): void {
   elapsedTime += deltaTime;
   updateDriving(deltaTime);
   updateCamera(deltaTime || 1 / 60);
+  updateFlickeringLamps(time);
   renderer.render(scene, camera);
   const tunnelWidth = tunnelAtDistance(distance)?.width ?? getLevel(currentLevel).tunnelWidth;
   const wallDistance = tunnelWidth / 2 - PLAYER_COLLISION_RADIUS - Math.abs(lateralOffset);

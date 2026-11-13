@@ -2,7 +2,7 @@ import type { LevelDefinition } from './types';
 
 const level: LevelDefinition = {
   id: 7, name: 'Violet Descent', length: 5400, tunnelWidth: 27.8, tunnelHeight: 16,
-  tunnels: [{ id: 'violet-high', start: 0, end: 930, style: 'neon' }, { id: 'violet-drop', start: 1078, end: 2690, style: 'metal' }, { id: 'violet-low', start: 2838, end: 5400, style: 'wireframe' }],
+  tunnels: [{ id: 'violet-high', start: 0, end: 930, style: 'neon' }, { id: 'violet-drop', start: 1078, end: 2690, style: 'metal' }, { id: 'violet-low', start: 2838, end: 5400, style: 'graffiti' }],
   jumps: [{ launch: 930, landing: 1078, rampSlope: 0.118 }, { launch: 2690, landing: 2838, rampSlope: 0.124 }],
   sharpTurns: [{ center: 1970, length: 176, direction: 1, strength: 5.5 }, { center: 3490, length: 208, direction: -1, strength: 6 }, { center: 4720, length: 188, direction: 1, strength: 5.7 }, { center: 5100, length: 166, direction: -1, strength: 5.3 }],
   track: {
